@@ -1,0 +1,13 @@
+;$Id$
+name = "GMOD Drupal Bioinformatic Server Framework"
+description = "Provides a common framework for bioinformatic modules such as genes4all and BioSoftware Bench"
+core = 6.x
+php = 5.1
+package = gmod_dbsf
+
+; Information added by drupal.org packaging script on 2012-05-31
+version = "6.x-2.2"
+core = "6.x"
+project = "gmod_dbsf"
+datestamp = "1338445560"
+

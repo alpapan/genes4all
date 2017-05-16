@@ -1,0 +1,58 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the genes4all_experiment module
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/**
+ * Implementation of the hook_install ().
+ */
+function genes4all_experiment_install() {
+  genes4all_experiment_install_cvs();
+}
+
+function genes4all_experiment_install_cvs() {
+  gmod_dbsf_add_cv('study_type', array('unfinished', 'RNAi'));
+  gmod_dbsf_add_cv('feature_type', array('rnai_construct', 'gene_target'));
+  gmod_dbsf_add_cv('resource_type', array('experimental animals', 'result set', 'assay protocol', 'delivery protocol'));
+  gmod_dbsf_add_cv('dev_stage', array('unfertilized egg', 'embryo', 'larva', 'pupa', 'adult'));
+  gmod_dbsf_add_cv('origin', array('lab_colony', 'field_collected'));
+  gmod_dbsf_add_cv('colony_infection', array('virus', 'bacteria', 'fungi', 'nematode', 'microsporidia', 'mite', 'unknown'));
+  gmod_dbsf_add_cv('indiv_infection', array('virus', 'bacteria', 'fungi', 'nematode', 'microsporidia', 'mite', 'unknown'));
+  gmod_dbsf_add_cv('aln_region', array('3utr', '5utr', 'intron', 'cds'));
+  gmod_dbsf_add_cv('rna_probe_type', array('siRNA', 'hairpinRNA', 'dsRNA'));
+  gmod_dbsf_add_cv('purification', array('salt precipitation', 'ethanol precipitation', 'isopropanol precipitation', 'column-based', 'phenol_chloroform', 'no_purification', 'bought_purified', 'unknown', 'other'));
+  gmod_dbsf_add_cv('detection_method', array('qPCR', 'RT-PCR (semi-quantitative)', 'S.blot', 'W.blot', 'N.blot', 'enzymatic_activity', 'phenotype'));
+  gmod_dbsf_add_cv('delivery_method', array('injection', 'feeding'));
+  gmod_dbsf_add_cv('silencing_level', array('none', 'low', 'high'));
+  gmod_dbsf_add_cv('detect_dsrna_processing', array('not checked', 'undetected', 'detected'));
+  gmod_dbsf_add_cv('control_method', array('non_specific_dsRNA', 'buffer'));
+  gmod_dbsf_add_cv('annealing_method', array('simultaneously with transcription', 'subsequent to transcription'));
+  gmod_dbsf_add_cv('construct_protocol', array('construct_protocol_invitro', 'construct_protocol_details', 'construct_protocol_kit'));
+  gmod_dbsf_add_cv('animal_properties', array('geolocation', 'pretreatment_q', 'pretreatment_protocol'));
+  gmod_dbsf_add_cv('delivery_protocol_properties', array('replicates', 'adjuvant_amount', 'adjuvant_name', 'delivery_buffer', 'construct_concentration', 'delivery_organ', 'control_method_detail', 'delivery_detail'));
+  gmod_dbsf_add_cv('assay_protocol_properties', array('detect_time', 'assay_organ'));
+  gmod_dbsf_add_cv('result_set_properties', array('silencing_accurate_level'));
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function genes4all_experiment_uninstall() {}
+
+/**
+ * Implementation of hook_enable().
+ */
+function genes4all_experiment_enable() {
+  genes4all_experiment_install_cvs();
+}
+
+/**
+ * Implementation of hook_disable().
+ */
+function genes4all_experiment_disable() {}
+

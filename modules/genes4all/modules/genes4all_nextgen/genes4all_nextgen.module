@@ -1,0 +1,317 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Supports Illumina, SAM/BAM for JBrowse and more
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/**
+ * Implementation of hook_menu
+ */
+function genes4all_nextgen_menu() {
+  $include_path = drupal_get_path('module','genes4all').'/modules/genes4all_nextgen/includes/';
+  $items = array();
+  $items['admin/settings/genes4all_nextgen'] = array(
+  	'file path' => $include_path,
+    'file' => 'genes4all_nextgen_admin.inc',
+    'title' => 'Genes4all NextGen module settings',
+    'page callback' => 'genes4all_nextgen_admin_page',
+    'access arguments' => array('Administrate genes4all_nextgen'),
+    'description' => 'Configure the Genes4all NextGen module',
+    'type' => MENU_NORMAL_ITEM,
+  );
+  require_once($include_path .'/genes4all_nextgen_admin.inc');
+  return $items;
+}
+
+/**
+ * Implementation of hook_perm
+ */
+function genes4all_nextgen_perm(){
+  return array('View Next-Gen data','Upload Next-Gen data','Curate uploaded Next-Gen data');
+}
+
+/**
+ * Implementation of hook_theme
+ * @return unknown_type
+ */
+function genes4all_nextgen_theme() {
+  $themes = array(
+    'genes4all_nextgen_admin_existing_form' => array(
+      'arguments' => array('form'),
+      'function' => 'genes4all_nextgen_theme_result_form',
+  ),
+  );
+  return $themes;
+}
+
+/**
+ * Implementation of hook_form
+ */
+function genes4all_nextgen_theme_result_form($form){
+  $output='';
+  $table_array = array();
+  if (!empty($form['data']['#value'])){
+    $table_array = $form['data']['#value'];
+  }else{
+    return;
+  }
+  drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/gmod_dbsf_sorttable.js');
+  $row_checked = array();
+  $checkall = theme('table_select_header_cell');
+  $table_array['header'][0] = array(
+  	'data' => $table_array['header'][0], 'class' => $checkall['class'] .' sortable'
+  	);
+  	foreach ($table_array['data'] as $row => $value_array) {
+  	  $path_id = $value_array[0]['id'];
+  	  $row_checked[] = array_merge(
+  	  array(
+  	  array('data' => drupal_render($form['checkboxes'][$path_id])),
+  	  ), array_slice($value_array, 1)
+  	  );
+  	}
+  	unset($form['checkboxes']);
+  	unset($form['data']);
+  	$output .= theme_table($table_array['header'], $row_checked, $table_array['attributes'], $table_array['caption']);
+  	$output .= drupal_render($form);
+  	return $output;
+}
+
+/**
+ * Get alignment metadata
+ *
+ * Run this from within chado using gmod_dbsf_db_execute
+ *
+ * @param $type_id
+ * Must be type ID
+ * @param $type
+ * 'feature', 'organism' or 'library'
+ *
+ * @return array
+ * Array with keys to:
+ * path and description.
+ */
+function genes4all_nextgen_get_alignments_meta($type_id=NULL,$type='feature'){
+  if (empty($type_id)){return;}
+  $return_array = array();
+  $nextgen_type_sql = 'SELECT DISTINCT genes4all_nextgen_id as id,full_path as path, description from {genes4all_nextgen} where genes4all_nextgen_id IN (SELECT genes4all_nextgen_id from {genes4all_nextgen_'
+  .$type.'} where '.$type.'_id=%d)';
+  $type_res = db_query($nextgen_type_sql,$type_id);
+  while ($nextgen_data = db_fetch_array($type_res)){
+    $return_array[]=array('path'=>$nextgen_data['path'],'description'=>$nextgen_data['description']);
+  }
+  return $return_array;
+}
+
+/**
+ * Get all alignment paths for a feature
+ *
+ * @see genes4all_nextgen_get_alignments_meta
+ *
+ * @param $feature
+ * Can be ID or uniquename
+ *
+ * @return array
+ * Returns an array with filepaths and descriptions.
+ *
+ */
+function genes4all_nextgen_get_all_feature_alignments($feature=NULL){
+  if (empty($feature)){return;}
+  $return_array = array();
+  $metadata = gmod_dbsf_get_feature_metadata($feature);
+  if (empty($metadata)){return;}
+  foreach ($metadata as $feature_id=>$metadata_array){
+    $arr = genes4all_nextgen_get_alignments_meta($feature_id,'feature');
+    if (!empty($arr)){$return_array = array_merge($return_array,$arr);}
+    if (!empty($metadata_array['organism_id'])){
+      $arr =genes4all_nextgen_get_alignments_meta($metadata_array['organism_id'],'organism');
+      if (!empty($arr)){$return_array = array_merge($return_array,$arr );}
+    }
+    if (!empty($metadata_array['library_id'])){
+      $arr = genes4all_nextgen_get_alignments_meta($metadata_array['library_id'],'library');
+      if (!empty($arr)){$return_array = array_merge($return_array,$arr);}
+    }
+  }
+  return $return_array;
+}
+
+function genes4all_nextgen_single_reference_alignment($source_file=NULL,$target_file=NULL,$reference=NULL){
+  if (empty($source_file)||empty($reference)||empty($target_file)){return;}
+  $samtools_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'genes4all_nextgen') . '/bin/samtools';
+  $sam_args = escapeshellcmd(" view -b -o $target_file -F 0x0004 $source_file $reference");
+  $exec_out=array();$exec_value='';
+  $ret = exec($samtools_exec.$sam_args,$exec_out,$exec_value);
+  if (!file_exists($target_file) || strpos($ret,' fail ')!==FALSE || strpos($ret,' unknown reference name ')!==FALSE ){
+    drupal_set_message('Failed to produce alignment for a specific reference sequence.','error');
+    return FALSE;
+  }if (filesize($target_file)<10){
+    drupal_set_message('Failed to produce alignment for a specific reference sequence.','error');
+    return FALSE;
+  }
+  return $target_file;
+}
+
+/*
+ * Get coverage data for a feature
+ *
+ * @param $feature
+ * Must be feature uniquename as it appears in SAM/BAM
+ * Except a string, it can also be an array of feature uniquenames
+ *
+ * @param $key
+ * If FALSE (default) then return array is first indexed by aln description
+ * If TRUE then it is indexed by $feature
+ *
+ * @return array
+ * array of depth. Threedimensional with 1st key being the
+ * description of alignment 2nd being $feature and 3rd the position
+ * Unless the $key is set to true in which case the 1st and 2nd key
+ * are inverted
+ *
+ * @see genes4all_nextgen_coverage_data_feature
+ */
+function genes4all_nextgen_coverage_data($feature=NULL,$key=FALSE){
+  if (empty($feature)){return;}
+  $return_array = array();
+  if (is_array($feature)){
+    foreach ($feature as $name){
+      $return_array=array_merge($return_array,genes4all_nextgen_coverage_data_feature($name,$key));
+    }
+  }else{
+    $return_array=genes4all_nextgen_coverage_data_feature($feature,$key);
+  }
+  return $return_array;
+}
+
+/*
+ * Helper function to get coverage data for a feature
+ *
+ * @param $feature_name
+ * Must be feature uniquename as it appears in SAM/BAM
+ *
+ * @param $key
+ * If FALSE (default) then return array is first indexed by aln description
+ * If TRUE then it is indexed by $feature
+ *
+ * @return array
+ * array of depth. Threedimensional with 1st key being the
+ * description of alignment 2nd being $feature and 3rd the position
+ * Unless the $key is set to true in which case the 1st and 2nd key
+ * are inverted
+ *
+ *
+ */
+function genes4all_nextgen_coverage_data_feature($feature_name=NULL,$key=FALSE){
+  if (empty($feature_name)){return;}
+  $return_array = array();
+  $alignment_files=genes4all_nextgen_get_all_feature_alignments($feature_name);
+  if (empty($alignment_files)){return;}
+  $samtools_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'genes4all_nextgen') . '/bin/samtools';
+  $caldepth_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'genes4all_nextgen') . '/bin/calDepth';
+  //get sequence length and maximum number of reads
+  $seqlength =0;
+  $exec_out = array();
+  $exec_value = '';
+  foreach ($alignment_files as $alignment){
+    $arg_exec = escapeshellcmd(' idxstats '.$alignment['path'].' |grep "^'.$feature_name.'"');
+    exec($samtools_exec.$arg_exec,$exec_out,$exec_value);
+    if ($exec_value !==0){continue;}
+    foreach ($exec_out as $hit){
+      $data = explode("\t",$hit);
+      $seqlength = ($data[0]===$feature_name && !empty($data[1]) ) ? $data[1] : $seqlength;
+    }
+  }
+  if (empty($seqlength)){
+    dpm(array('Seqlength is empty'));
+    return;
+  }
+  $graph_window = 20;
+  if ($seqlength > 2000) {
+    $graph_window = 5 * $graph_window;
+  }elseif ($seqlength > 1000) {
+    $graph_window = 2.5 * $graph_window;
+  }
+  $return_array[$feature_name]['all']['graph_window']=$graph_window;
+  $return_array[$feature_name]['all']['seqlength']=$seqlength;
+  // Process alignments
+  foreach ($alignment_files as $alignment){
+    $data_array=array();
+    $exec_out=array();$exec_value='';
+    $arg_exec = escapeshellcmd(' '.$alignment['path']." $feature_name");
+    //returns exec_value== 0 if all good
+    $arr = exec($caldepth_exec.$arg_exec,$exec_out,$exec_value);
+    if ($exec_value===0){
+      foreach ($exec_out as $hit){
+        $data = explode("\t",$hit);
+        $data_array[$data[1]]+=$data[2];
+      }
+    }else{
+      return;
+    }
+    //build array for plotting
+    $k = (int)0;
+    for ($i = 0; $i < $seqlength; $i += $graph_window) {
+      $count = !empty($data_array[$i]) ? $data_array[$i] : (int)0;
+      $return_array[$feature_name][$alignment['description']]['values'][$k] =array('y' => $count, 'x' => $i);
+      $return_array[$feature_name]['all']['values'][$k]['y']+=$count;
+      $return_array[$feature_name]['all']['values'][$k]['x']=$i;
+      $k++;
+    }
+  }
+  // finished processing the alignments
+  foreach ($return_array[$feature_name]['all']['values'] as $data){
+    $return_array[$feature_name]['all']['max']= $data['y']> $return_array[$feature_name]['all']['max']
+     ? $data['y']
+     : $return_array[$feature_name]['all']['max'];
+  }
+  if (empty($key)){
+    $ret2 = array();
+    foreach ($return_array[$feature_name] as $desc=>$data){
+      $ret2[$desc][$feat]=$data;
+    }
+    return $ret2;
+  }
+  return $return_array;
+}
+
+function genes4all_nextgen_check_sam_file_type($filename=NULL){
+  if (
+  empty($filename)
+  || !file_exists($filename)
+  || !is_readable($filename)
+  ){return FALSE;}
+  $samtools_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'genes4all_nextgen') . '/bin/samtools';
+  $file_type ='';
+  $type = exec("file -b ".$filename);
+  if (strpos($type,'ASCII')!==FALSE){
+    $type_file =exec($samtools_exec ." view -H -S ".$filename);
+    if (strpos($type_file,'@')===0){
+      $file_type='SAM';
+    }
+  }elseif (strpos($type,'extra field')!==FALSE){
+    $type_file =exec($samtools_exec ." view -H ".$filename);
+    $type_file=check_plain($type_file);
+    if (strpos($type_file,'@')===0){
+      $file_type='BAM';
+    }
+  }elseif (strpos($type,'gzip')!==FALSE){
+    $type_file = exec("gunzip -c $filename | head -n 1");
+    if (strpos($type_file,'@')===0){
+      $file_type='SAM';
+    }elseif (strpos($type_file,'BAM')!==FALSE){
+      $file_type='BAM';
+    }
+  }elseif (strpos($type,'bzip2')!==FALSE){
+    $type_file = exec("bunzip2 -kc $filename | head -n 1");
+    if (strpos($type_file,'@')===0){
+      $file_type='SAM';
+    }elseif (strpos($type_file,'BAM')!==FALSE){
+      $file_type='BAM';
+    }
+  }
+  return $file_type;
+}
+

@@ -1,0 +1,563 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Drupal module for JBrowse, the Genome Browser from Berkeley
+ *
+ * Developed by Alexie Papanicolaou
+ * CSIRO Ecosystem Sciences
+ * @see http://insectacentral.org
+ */
+
+/**
+ * @file
+ * Notes
+ *
+ * bam-to-json requires -css est
+ * The hyperlinks to databases when right-clicking are derived from Chado's db.urlprefix
+ *
+ */
+
+/**
+ * Implements hook_perm().
+ */
+function jbrowse_perm() {
+  $perms = array('Access jbrowse');
+  return $perms;
+}
+
+/**
+ * Implements hook_menu().
+ *
+ * If it finds plugin files, it adds them too.
+ */
+function jbrowse_menu() {
+  $items = array();
+  $items['jbrowse'] = array(
+    'title' => 'Access JBrowse',
+    'page callback' => 'jbrowse_get_feature',
+    'page arguments' => array(1),
+    'access arguments' => array('Access jbrowse'),
+    'type' => MENU_CALLBACK,
+  );
+
+
+  return $items;
+}
+
+/**
+ * Prepare html.index file in tempdir and symlink/copy dojo library
+ *
+ * This could be avoided and JBrowse properly embedded
+ * but lot's of Drupal/JBrowse collision bugs may crop up
+ * (and also JBrowse looks better when maximized)
+ */
+function jbrowse_prepare_index(&$context) {
+  global $base_url;
+  $context['message']='Preparing HTML files';
+  $uid = gmod_dbsf_create_uid();
+  $context['results']['uid']=$uid;
+  $base_path = base_path();
+  $module_url = $base_url.'/'.drupal_get_path('module', 'jbrowse');
+  $file_path  = file_create_path() ;
+  $dirpath = $file_path .'/jbrowse/';
+  $tmp_path = $dirpath.$uid.'/';
+  $context['results']['tmp_path'] = $tmp_path;
+  $data_url = $base_url.'/'.$tmp_path.'data/';
+  $context['results']['data_url'] = $data_url;
+  $context['results']['data_path'] = $tmp_path.'data/';
+  mkdir($tmp_path);
+  mkdir($tmp_path.'/data');
+  mkdir($tmp_path.'/jslib');
+  $site_name = variable_get('site_name','');
+  $site_slogan = variable_get('site_slogan','');
+  /**
+  For some reason, dojo.js nls and resources cannot be absolute paths so must symlink them,
+  except nls which must be copied... (176K and cannot reduce)
+   */
+
+  $absolute_dir = dirname(__FILE__);
+  symlink($absolute_dir.'/jslib/dojo',$tmp_path.'jslib/dojo');
+  symlink($absolute_dir.'/jslib/dijit',$tmp_path.'jslib/dijit');
+  $text = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+  <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+  <head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>JBrowse | '.$site_name.'</title>
+  <link rel="shortcut icon" href="'.$base_path.$file_path.'/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" type="text/css" href="jslib/dijit/themes/tundra/tundra.css"/>
+  <link rel="stylesheet" type="text/css" href="jslib/dojo/resources/dojo.css"/>
+  <link rel="stylesheet" type="text/css" href="'.$module_url.'/genome.css"/>
+  <script type="text/javascript" src="jslib/dojo/dojo.js"></script>
+  <script type="text/javascript" src="jslib/dijit/dijit.js"></script>
+  <script type="text/javascript" src="jslib/dojo/jbrowse_dojo.js"></script>
+
+  <script type="text/javascript" src="'.$module_url.'/js/Browser.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/Util.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/NCList.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/LazyPatricia.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/LazyArray.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/Track.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/SequenceTrack.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/Layout.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/FeatureTrack.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/UITracks.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/ImageTrack.js"></script>
+  <script type="text/javascript" src="'.$module_url.'/js/GenomeView.js"></script>
+  <script type="text/javascript" src="data/refSeqs.js"></script>
+  <script type="text/javascript" src="data/trackInfo.js"></script>
+  ';
+  $text .='<script type="text/javascript">';
+  $text .=<<<END
+  /* <![CDATA[ */
+          var queryParams = dojo.queryToObject(window.location.search.slice(1));
+           var bookmarkCallback = function(brwsr) {
+               return window.location.protocol
+                      + "//" + window.location.host
+                      + window.location.pathname
+                      + "?loc=" + brwsr.visibleRegion()
+                      + "&tracks=" + brwsr.visibleTracks();
+           }
+
+           var b = new Browser({
+                                   containerID: "GenomeBrowser",
+                                   refSeqs: refSeqs,
+                                   trackData: trackInfo,
+                                   browserRoot: "$module_url/",
+                                   location: queryParams.loc,
+                                   tracks: queryParams.tracks,
+                                   bookmark: bookmarkCallback,
+                                   dataRoot: "data/"
+                               });
+  /* ]]> */
+END;
+  $text .= "</script>\n</head>";
+  $text .='<body><p><div id="header"><div id="logo-sitename"><div class="clear-block">';
+  $text .=theme_image($file_path.'/logo.png',$site_name,$site_name,TRUE);
+  $text .= '<h1 class="site-name"><a href="/" title="Home">'.$site_name.'</a>: '
+  . l($context['results']['feature'],'genes4all/info/feature',array('query' =>array('feature_id'=>$context['results']['feature'])))
+  .'</h1><h2 class="site-slogan">'.$site_slogan.'</h2></div></div></div></p>';
+  $text .='<p>Tip: You can use <b>Right-Click</b> to open a menu over some features (and their labels).</p>';
+  $text .= '<div style="height: 90%; width: 100%;"><div id="GenomeBrowser" style="height: 100%; width: 100%; padding: 0; border: 0;"></div></div>';
+  $text .=variable_get('jbrowse_footer','<div id="footer"><div id="footer-inner">(C) JBrowse see '.l('http://jbrowse.org','http://jbrowse.org').'; InsectaCentral: 2007-2011 Alexie Papanicolaou. <a href="http://www.gnu.org/copyleft/lesser.html">LGPLv3</a><br/></div></div>').'</body></html>'."\n";
+  $t=file_save_data($text,$tmp_path.'/index.html',FILE_EXISTS_REPLACE);
+}
+
+function jbrowse_prepare_reference(&$context){
+  $uid=$context['results']['uid'];
+  $feature_data=$context['results']['feature_data'];
+  if (empty($uid)|| empty($feature_data)){return;}
+  $context['message']='Deploying JBrowse';
+  $data_path = $context['results']['data_path'];
+  mkdir($data_path.'/seq/');
+  //refSeqs.js trackInfo.js
+  $ref_name = $feature_data['uniquename'];
+  mkdir($data_path.'/seq/'.$ref_name);
+  $ref_length = $feature_data['seqlen'];
+  $chunk_size = ($ref_length > 20000) ? 20000 : $ref_length;
+  // type casting of integers important for js
+  $refSeqs[] =array(
+    'length'=>(int)$ref_length,
+    'name'=>$ref_name,
+    'seqDir'=>'seq/'.$ref_name,
+    'seqChunkSize' => (int)$chunk_size,
+    'end' => (int)$ref_length,
+    'start' => (int)0,
+  );
+  $ref_json = "refSeqs = \n".json_encode($refSeqs);
+  $t=file_save_data($ref_json,$data_path.'refSeqs.js',FILE_EXISTS_REPLACE);
+  //jbrowses uses - as a hyphen, screwing up the sequence track
+  $feature_data['residues']=strtr($feature_data['residues'],'-','*');
+  // SEQ
+  // raw (not fasta) lower-case sequence file in data/seq/$refname/\d.txt where \d is incrementing from 0
+  if ($chunk_size == $ref_length){
+    $t=file_save_data($feature_data['residues'],$data_path.'/seq/'.$ref_name."/0.txt",FILE_EXISTS_REPLACE);
+  }else{
+    $seq_chunks=str_split($feature_data['residues'],$chunk_size);
+    foreach ($seq_chunks as $i=>$chunk){
+      $t=file_save_data($chunk,$data_path.'/seq/'.$ref_name."/$i.txt",FILE_EXISTS_REPLACE);
+    }
+  }
+
+  // trackinfo; {refseq} is a placeholder
+  $trackInfo[] =array(
+      "args" => array(
+         "chunkSize" => (int)$chunk_size
+      ),
+      "url" => "seq/{refseq}/",
+      "type" => "SequenceTrack",
+      "label" => "DNA",
+      "key" => "DNA"
+   );
+  $ref_json = "trackInfo = \n".json_encode($trackInfo);
+  $t=file_save_data($ref_json,$data_path.'trackInfo.js',FILE_EXISTS_REPLACE);
+}
+
+function jbrowse_prepare_nextgen(&$context){
+  //NB bam-to-json.pl requires -css est and -t and -k
+  $nextgen_array  = gmod_dbsf_db_execute('chado','genes4all_nextgen_get_all_feature_alignments',$context['results']['feature_data']['feature_id']);
+  if (empty($nextgen_array)){return;}
+  $bam_dir = $context['results']['tmp_path'].'bam_files/';
+  mkdir($bam_dir);
+  foreach ($nextgen_array as $nextgen_id=>$nextgen_data){
+    $computerized_name=str_replace(' ','_',$nextgen_data['description']);
+    //this will create a new 
+    //$bam_path = genes4all_nextgen_single_reference_alignment($nextgen_data['path'],$bam_dir.$computerized_name,$context['results']['feature_data']['uniquename']);
+    //Where as this will create a symbolic link for the entire alignment
+    $res = symlink($nextgen_data['path'],$bam_dir.$computerized_name);
+    if (empty($res)){
+      drupal_set_message('Failed to find and link NGS alignment for JBrowse.','error');
+      return FALSE;
+    }
+    //Link index
+    symlink($nextgen_data['path'].'.bai',$bam_dir.$computerized_name.'.bai');
+    $bam_path = $bam_dir.$computerized_name;
+    //*/
+    $bam_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'jbrowse').'/bin/bam-to-json.pl';
+    $bam_args = escapeshellcmd(' -b '.$bam_path.' -out '. $context['results']['data_path']
+    ." -css est -t $computerized_name -k '".
+    $nextgen_data['description']."'");
+    $exec_out=array();$exec_value='';
+    $ret = exec($bam_exec.$bam_args,$exec_out,$exec_value);
+    if ($exec_value>0){
+      //dpm(array($ret,$exec_out,$exec_value,$bam_exec.$bam_args));
+      drupal_set_message('There was a problem creating the JBrowse next-gen alignment data.','error');
+      return;
+    }
+  }
+}
+
+function jbrowse_prepare_blasts(&$context){
+  global $base_url;
+  $return_array = array();
+  //two indexes for blastdbs: [0] is protein_matches and [1] is nucleotide matches
+  #list ($blastdb_array,$blastdb_types) = gmod_dbsf_db_execute('chado','gmod_dbsf_chado_get_feature_blastdbs',$context['results']['feature_data']['feature_id']);
+  $blastdb_array  = gmod_dbsf_db_execute('chado','gmod_dbsf_chado_get_featuregff_blastdbs',$context['results']['feature_data']['feature_id']);
+  foreach ($blastdb_array[0] as $key=>$blastdb){
+    $blastdb=str_replace('/','_',$blastdb);
+    $computerized_name=str_replace(' ','_',$blastdb);
+    $return_array[]=array(
+      'track'=> $computerized_name,
+      'key'=> $blastdb,
+      'category'=> 'Similarity Searches',
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'feature'=> array('protein_match:'.$blastdb),
+ 	  'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>"sub {shift->score();}",
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+    );
+  }foreach ($blastdb_array[1] as $key=>$blastdb){
+    $computerized_name=str_replace(' ','_',$blastdb);
+    $return_array[]=array(
+      'track'=> $computerized_name,
+      'key'=> $blastdb,
+      'category'=> 'Similarity Searches',
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'feature'=> array('nucleotide_match:'.$blastdb),
+      'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>'sub {shift->score();}',
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+        );
+  }
+  return $return_array;
+}
+
+function jbrowse_build_conf(&$context){
+  $uid=$context['results']['uid'];
+  if (empty($uid)){return;}
+  $context['message']='Building JBrowse files';
+  // General Settings
+  global $db_url;
+  global $base_url;
+  $cwd=getcwd();
+  $tmp_path = $context['results']['tmp_path'];
+  //drupal if no chado, potential for support drupal as well.
+  $db_data=parse_url($db_url['chado']);
+  $dsn='dbi:Pg:dbname='.ltrim($db_data['path'],'/')
+  .';host='.$db_data['host'].';port='.$db_data['port'];
+  $jbrowse_config = array(
+    'description' =>'Database',
+    'db_adaptor' => 'Bio::DB::Das::Chado_AP',
+    'db_args' => array(
+      '-adaptor' => 'DBI::Pg',
+      '-user' => $db_data['user'],
+      '-pass' => $db_data['pass'],
+      '-dsn' => $dsn
+    ),
+    'TRACK DEFAULTS' => array(
+      'class' => 'feature',
+    ),
+    'tracks' => array()
+  );
+   $type = $context['results']['feature_data']['type_name'];
+  // Now the tracks it depends on type
+  switch ($type){
+  // contig
+    case 'contig':
+      $jbrowse_config['tracks'][] = array(
+      'track'=> 'Reads',
+      'key'=> 'Reads',
+      'feature'=> array('read'),
+      'class'=> 'est',
+      'category'=> 'Assembly',
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'clientConfig'=> array(
+        'histScale'=>30
+      )
+    );$jbrowse_config['tracks'][] = array(
+      'track'=> 'ORF',
+      'key'=> 'Predicted ORFs',
+      'category'=> 'Predictions',
+      'feature'=> array('ORF'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'class'=> 'feature2'
+    );$jbrowse_config['tracks'][] = array(
+      'track'=> 'SNP',
+      'key'=> 'SNPs',
+      'category'=> 'Predictions',
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'feature'=> array('SNP'),
+      'class'=> 'triangle hgred'
+    );
+    $jbrowse_config['tracks'][] = array(
+      'track'=> 'protein_match',
+      'key'=> 'All BLASTXs',
+      'category'=> 'Similarity Searches',
+      'clientConfig' =>array('histScale'=>$context['results']['feature_data']['seqlen']),
+      'feature'=> array('protein_match'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+ 	  'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>"sub {shift->score();}",
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+        );
+    $jbrowse_config['tracks'][] = array(
+      'track'=> 'nucleotide_match',
+      'key'=> 'All BLASTNs',
+      'category'=> 'Similarity Searches',
+      'clientConfig' =>array('histScale'=>$context['results']['feature_data']['seqlen']),
+      'feature'=> array('nucleotide_match'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+ 	  'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>"sub {shift->score();}",
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+    );
+    $blasts = array();
+    $blasts= jbrowse_prepare_blasts($context);
+    $jbrowse_config['tracks']=array_merge($jbrowse_config['tracks'],(array)$blasts);
+    break;
+
+  // peptides
+    case 'polypeptide':
+    $jbrowse_config['tracks'][] = array(
+      'track'=> 'protein_match',
+      'key'=> 'All BLASTs',
+      'category'=> 'Similarity Searches',
+      'clientConfig' =>array('histScale'=>$context['results']['feature_data']['seqlen']),
+      'feature'=> array('protein_match'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+ 	  'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>"sub {shift->score();}",
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+    );
+    $blasts = array();
+    $blasts = jbrowse_prepare_blasts($context);
+    $jbrowse_config['tracks']=array_merge($jbrowse_config['tracks'],(array)$blasts);
+
+    break;
+  // ORFs
+    case 'ORF':
+    $jbrowse_config['tracks'][] = array(
+      'track'=> 'ORF',
+      'key'=> 'Predicted Peptide',
+      'category'=> 'Predictions',
+      'feature'=> array('polypeptide'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'class'=> 'feature2'
+    );$jbrowse_config['tracks'][] = array(
+      'track'=> 'SNP',
+      'key'=> 'SNPs',
+      'category'=> 'Predictions',
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+      'feature'=> array('SNP'),
+      'class'=> 'triangle hgred'
+    );
+    $jbrowse_config['tracks'][] = array(
+      'track'=> 'protein_match',
+      'key'=> 'All BLASTXs',
+      'category'=> 'Similarity Searches',
+      'feature'=> array('protein_match'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+ 	  'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>"sub {shift->score();}",
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+    );
+    $jbrowse_config['tracks'][] = array(
+      'track'=> 'nucleotide_match',
+      'key'=> 'All BLASTNs',
+      'category'=> 'Similarity Searches',
+      'clientConfig' =>array('histScale'=>$context['results']['feature_data']['seqlen']),
+      'feature'=> array('nucleotide_match'),
+      'urlTemplate'  => $base_url.'/genes4all/info/feature?feature_id={name}',
+ 	  'clientConfig' =>array('histScale'=>ceil($context['results']['feature_data']['seqlen']/3)<200 ? ceil($context['results']['feature_data']['seqlen']/3) : 200),
+      'subfeatures'=> true,
+      'arrowheadClass'=> 'transcript-arrowhead',
+      'subfeature_classes'=>array(
+        'match_part'=> 'match_part'
+      ),
+      'class'=> 'generic_parent',
+      'extraData'=>array(
+  	  	'score'=>"sub {shift->score();}",
+        'dbxref_table'=>'sub {shift->dbxref_table();}',
+      )
+    );
+    $blasts = array();
+    $blasts = jbrowse_prepare_blasts($context);
+    $jbrowse_config['tracks']=$blasts;
+    $jbrowse_config['tracks']=array_merge($jbrowse_config['tracks'],(array)$blasts);
+    break;
+  }
+  $config_str=json_encode($jbrowse_config);
+  $t=file_save_data($config_str,$tmp_path.'jbrowse.conf',FILE_EXISTS_REPLACE);
+  $jbrowse_biodb_prep=$cwd.'/'.drupal_get_path('module', 'jbrowse').'/bin/biodb-to-json.pl';
+  $biodb_args = escapeshellcmd(" -conf jbrowse.conf");
+  chdir($tmp_path);
+  $exec_out=array();$exec_value='';
+  exec($jbrowse_biodb_prep.$biodb_args,$exec_out,$exec_value);
+  chdir($cwd);
+  jbrowse_prepare_nextgen($context);
+
+  if ($exec_value ==0){
+    $context['results']['conf']="$tmp_path/jbrowse.conf";
+  }
+}
+
+function jbrowse_get_data($feature,&$context){
+  $context['message']='Fetching reference data';
+  $context['results']['feature']=$feature;
+  $context['results']['feature_data']=gmod_dbsf_db_execute('chado','gmod_dbsf_get_feature_data',array($feature));
+  if (empty($context['results']['feature_data'])){
+    drupal_set_message('No data found for this feature in the database. Perhaps you are not permitted to access them.','error');
+    _batch_finished();
+  }
+}
+
+function jbrowse_get_feature($feature=NULL){
+  if (empty($feature)){
+    return "No feature specified";
+  }
+  $feature=check_plain($feature);
+  $feature_check = gmod_dbsf_db_execute('chado','gmod_dbsf_get_feature_name_id',$feature,TRUE);
+  if (empty($feature_check)){
+    return "Failed to find $feature";
+  }
+  jbrowse_feature($feature);
+  return "Failed to find $feature";
+}
+
+/**
+ * Prepare jbrowse files via batch
+ */
+function jbrowse_feature($feature=NULL){
+  if (empty($feature)){return;}
+  $operations = array();
+  //prepare sequence data. end if no access
+  $operations[] = array('jbrowse_get_data',array($feature));
+  //prepare header data
+  $operations[] = array('jbrowse_prepare_index',array());
+  //write data files
+  $operations[]=array('jbrowse_prepare_reference',array());
+  //configuration & prepare files
+  $operations[] = array('jbrowse_build_conf',array());
+  $batch        = array(
+    'title' => t('Preparing data needed for JBrowse...'),
+    'operations' => $operations,
+    'init_message' => t('Preparing data needed for JBrowse...'),
+    'progress_message' => t('@remaining operations remaining...'),
+    'error_message' => t('Data preparation encountered an error.'),
+    'finished' => 'jbrowse_feature_batch_finished',
+    //'file' => drupal_get_path('module', 'jbrowse') .'/jbrowse.module',
+    'progressive'=> TRUE,
+  );
+  batch_set($batch);
+  batch_process();
+  return 0;
+}
+
+function jbrowse_feature_batch_finished($success, $results, $operations) {
+  if (empty($results['feature_data'])){
+    drupal_goto('feature/denied/'.$results['feature']);
+  }
+  elseif (!empty($success)) {
+    $uid = $results['uid'];
+    //debug     drupal_goto('feature/denied/'.$results['feature']);
+    drupal_goto(file_create_path() .'/jbrowse/'.$uid.'/');
+  }else {
+    $uid = $results['uid'];
+    $error_operation = reset($operations);
+    $message         = t('An error occurred while processing your request. Please '. l('contact', 'contact') ." the administrator reporting: $uid.");
+    drupal_set_message($message, 'error');
+  }
+
+  return;
+}
+
+/**
+ * Implement hook_cron()
+ *
+ * Finds & deletes temporary files
+ */
+function jbrowse_cron() {
+  $dirpath = file_create_path() .'/jbrowse';
+  file_scan_directory($dirpath, '.+', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+}

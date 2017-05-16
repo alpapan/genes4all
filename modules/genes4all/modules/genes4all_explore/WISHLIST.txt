@@ -1,0 +1,7 @@
+;$Id:$
+
+# Performance
+When viewing features, the tabs should make use of Ajax so that data is loaded only when needed.
+
+# Bugs
+Searching by library names currently does not work

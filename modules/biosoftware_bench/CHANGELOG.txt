@@ -1,0 +1,19 @@
+; $Id:$
+
+CHANGELOG
+
+dbsf 6.x-0.9-dev
+============
+
+  * First public release
+
+  NB: Please visit update.php to apply pending updates.
+
+biosoftware_bench 6.x-1.0
+==========================
+  
+  * Rebranded to biosoftware_bench
+
+biosoftware_bench 6.x-2.0
+==========================
+Many many changes.

@@ -1,0 +1,15 @@
+;$Id$
+name = "JBrowse - JavaScript Genome Browser"
+description = "Genome Browser plugin for Drupal"
+core = 6.x
+php = 5.1
+package = Genes4All
+dependencies[] = gmod_dbsf
+
+
+; Information added by drupal.org packaging script on 2012-05-31
+version = "6.x-2.2"
+core = "6.x"
+project = "Jbrowse"
+datestamp = "1338445855"
+

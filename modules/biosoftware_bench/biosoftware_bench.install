@@ -1,0 +1,218 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the biosoftware_bench module
+ *
+ * Requires the tabs and gmod_dbsf modules.
+ * @see gmod_dbsf.module
+ * Developed by Alexie Papanicolaou and Ritika Chauhan.
+ * University of Exeter. Licensed under GPLv3
+ */
+
+/**
+ * Custom implementation of the hook_install ().
+ *
+ * Uses db_query to change type to boolean (unsupported in Drupal 6)
+ * Adds some CVs
+ * Looks for include files to include plugins.
+ */
+function biosoftware_bench_install() {
+  // Nothing to do here, we do it in biosoftware_bench_enable
+}
+
+function biosoftware_bench_install_cvs() {
+  // add CVterms you might need. Core only (plugins go to include)
+  gmod_dbsf_add_cv('software_type', array('similarity search', 'de-novo prediction'));
+  gmod_dbsf_add_cv('dataset_type', array('protein', 'nucleotide'));
+  gmod_dbsf_add_cv('resource_type', array('software option', 'dataset', 'dataset_group', 'directory', 'filename'));
+  gmod_dbsf_add_cv('software_setting', array('executable', 'data'));
+  gmod_dbsf_add_cv('input type', array('select', 'textfield', 'textarea', 'checkbox', 'checkboxes', 'radio', 'radios'));
+  drupal_set_message(t('Some new CVs have been added to your Drupal database.'),'warning');
+}
+
+function biosoftware_bench_install_software() {
+  // core software always installed
+  $check_software_sql  = "SELECT software_id from {gmod_dbsf_software} where uniquename='%s'";
+  $delete_software_sql = "DELETE from {gmod_dbsf_software} where uniquename='%s'";
+  $add_software_sql    = "INSERT INTO {gmod_dbsf_software} (uniquename,description) VALUES ('%s','%s')";
+  $software_core_avail = array(
+    'condor' => "If installed, searches will be launched via Condor. Changing this settings requires restart of biosoftware_bench_daemon.pl.",
+  );
+  $install_blast = FALSE;
+  foreach ($software_core_avail as $software_name => $description) {
+    $check = db_fetch_array(db_query($check_software_sql, $software_name));
+    if (empty($check)) {
+      db_query($add_software_sql, $software_name, $description);
+    }
+  }
+
+  // determine which plugins exist
+  $plugin_path = drupal_get_path('module', 'biosoftware_bench') .'/includes/';
+  $plugins = array();
+  //PLUGIN_EDIT_HERE
+  if (file_exists($plugin_path .'biosoftware_bench_blastall_install.inc')) {
+    $plugins['blastall']['file'] = $plugin_path .'biosoftware_bench_blastall_install.inc';
+    $plugins['blastall']['desc'] = "BLAST from NCBI implementation from the C toolkit (BLASTALL)";
+  }
+  if (file_exists($plugin_path .'biosoftware_bench_ssaha2_install.inc')) {
+    $plugins['ssaha2']['file'] = $plugin_path .'biosoftware_bench_ssaha2_install.inc';
+    $plugins['ssaha2']['desc'] = "SSAHA2 rapidly aligns reads of most sequencing platforms (ABI-Sanger, Roche 454, Illumina-Solexa) to reference databases";
+  }
+  if (file_exists($plugin_path .'biosoftware_bench_iprscan_install.inc')) {
+    $plugins['iprscan']['file'] = $plugin_path .'biosoftware_bench_iprscan_install.inc';
+    $plugins['iprscan']['desc'] = "InterProScan is a tool that combines different protein signature recognition methods into one resource. The number of signature databases and their associated scanning tools, as well as the further refinement procedures, increases the complexity of protein domain identification. InterProScan provides an integrated solution.";
+  }
+  if (file_exists($plugin_path .'biosoftware_bench_annot8r_install.inc')) {
+    $plugins['annot8r']['file'] = $plugin_path .'biosoftware_bench_annot8r_install.inc';
+    $plugins['annot8r']['desc'] = "The annot8r software is a tool that assigns GO, EC and KEGG annotations for data sets resulting from EST sequencing projects both rapidly and efficiently. The benefits of an underlying relational database, flexibility and the ease of use of the program make it ideally suited for non-model species EST-sequencing projects..";
+  }
+  foreach ($plugins as $plugin_name => $plugin_data) {
+    require_once($plugin_data['file']);
+    $check = db_fetch_array(db_query($check_software_sql, $plugin_name));
+    if (empty($check)) {
+      db_query($add_software_sql, $plugin_name, $plugin_data['desc']);
+      switch ($plugin_name) {
+        // PLUGIN_EDIT_HERE
+
+        case 'blastall':
+          drupal_set_message(t('Processing blastall plugin'));
+          biosoftware_bench_add_software_blastall();
+          break;
+
+        case 'ssaha2':
+          drupal_set_message(t('Processing ssaha2 plugin'));
+          biosoftware_bench_add_software_ssaha2();
+          break;
+
+        case 'iprscan':
+          drupal_set_message(t('Processing iprscan plugin'));
+          biosoftware_bench_add_software_iprscan();
+          break;
+
+        case 'annot8r':
+          drupal_set_message(t('Processing annot8r plugin'));
+          biosoftware_bench_add_software_annot8r();
+          break;
+      }
+      drupal_set_message(t('%plugin_name plugin found and installed.', array('%plugin_name' => $plugin_name)), 'warning');
+    }
+  }
+
+  //file_check_directory($dirpath, FILE_MODIFY_PERMISSIONS);
+  drupal_set_message(t('Settings for biosoftware_bench updated.'), 'warning');
+}
+
+function biosoftware_bench_enable() {
+  biosoftware_bench_install_cvs();
+  biosoftware_bench_install_software();
+  // A module specific directory with sites/...../files/ which will hold temporary and output data
+  // symlinks don't work with file_create_path (if outside /files)
+  $script_path = gmod_dbsf_drupal_root(). drupal_get_path('module', 'biosoftware_bench') . '/scripts/';
+  $dirpath = file_create_path() .'/bench/';
+  file_check_directory($dirpath, FILE_CREATE_DIRECTORY);
+  chmod($dirpath, 0777);
+  // prevent indexing via www
+  if (!file_exists($dirpath .'/index.html')) {
+    touch($dirpath .'/index.html');
+  }
+  symlink($script_path . 'start_daemon.sh',$dirpath. '/start_daemon.sh');
+  symlink($script_path . 'biosoftware_bench_daemon.pl',$dirpath . '/biosoftware_bench_daemon.pl');
+}
+
+function biosoftware_bench_disable() {
+  $dirpath = file_create_path() .'/bench';
+  $f = file_scan_directory($dirpath, '.+', array('.', '..', 'CVS'), 0, TRUE);
+  foreach ($f as $fname => $obj) {
+    file_delete($fname);
+  }
+  //directory or symlink
+  if (is_dir($dirpath) && !is_link($dirpath)) {
+    rmdir($dirpath);
+  }
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function biosoftware_bench_uninstall() {
+  /*PLUGIN_EDIT_HERE
+   * add any new software names in array:
+   */
+
+
+  $array      = array('blastall', 'condor', 'formatdb', 'fastacmd', 'ssaha2', 'ssaha2Build', 'iprscan', 'annot8r', 'ipr_convert');
+  $array_str  = gmod_dbsf_array2csv($array, TRUE);
+  $delete_sql = "DELETE FROM {gmod_dbsf_software} where uniquename IN ($array_str)";
+  db_query($delete_sql);
+  drupal_set_message(t('Deleted software and resources affiliated with %s', array('%s' => $array_str)));
+  //resources to delete
+  $array = array('Scoring matrix', 'Filtering', 'E-value cutoff', 'Advanced BLAST options', 'query genetic code', 'DB genetic code', 'Frame shift penalty', 'Number of results'
+    , 'ssaha2_query_type', 'ssaha2_best', 'ssaha2_score', 'ssaha2_identity', 'ssaha2_cmatch', 'ssaha2_ckmer', 'ssaha2_cut', 'ssaha2_depth'
+    , 'ipr_application', 'crc', 'iprlookup', 'goterms'
+    , 'anno8r_application'
+    //temporary for update
+    , 'application',
+  );
+  $array_str = gmod_dbsf_array2csv($array, TRUE);
+  $delete_sql = "DELETE FROM {gmod_dbsf_resource} where uniquename IN ($array_str)";
+  db_query($delete_sql);
+
+  // remove varialbes
+  gmod_dbsf_get_add_var('biosoftware_bench_upload_size', 'DELETE');
+  gmod_dbsf_get_add_var('biosoftware_bench_cron_cleanup', 'DELETE');
+  gmod_dbsf_get_add_var('biosoftware_bench_cpus', 'DELETE');
+  $dirpath = file_create_path() .'/bench';
+  //directory or symlink
+  if (is_link($dirpath)) {
+    file_delete($dirpath);
+  }
+  elseif (is_dir($dirpath)) {
+    $f = file_scan_directory($dirpath, '.+', array('.', '..', 'CVS'), 0, TRUE);
+    foreach ($f as $fname => $obj) {
+      file_delete($fname);
+    }
+    rmdir($dirpath);
+  }
+}
+
+/**
+ * Save a software option.
+ *
+ * @param $name
+ *   Name of option to add
+ * @param $dbxref_id
+ *   ID of dbxref to link with dbxref
+ * @param $cvterm_id
+ *   ID of cvterm to use as type id
+ * @param $description
+ *   Optionally add a description.
+ *
+ * @return
+ *   Returns FALSE on failure or TRUE on success.
+ */
+function biosoftware_bench_add_software_option($name, $dbxref_id, $cvterm_id, $description = NULL) {
+  if (empty($name) || empty($dbxref_id) || empty($cvterm_id)) {
+    return FALSE;
+  }
+  db_query("DELETE FROM {gmod_dbsf_resource} where uniquename='%s'", $name);
+  if (empty($description)) {
+    db_query("INSERT INTO {gmod_dbsf_resource} (uniquename,organism_id,dbxref_id,type_id) " . "VALUES ('%s',1,%d,%d)", $name, $dbxref_id, $cvterm_id
+    );
+  }
+  else {
+    db_query("INSERT INTO {gmod_dbsf_resource} (uniquename,organism_id,dbxref_id,type_id,description) " . "VALUES ('%s',1,%d,%d,'%s')", $name, $dbxref_id, $cvterm_id, $description
+    );
+  }
+  // Check:
+  $res = db_fetch_array(db_query("SELECT resource_id from {gmod_dbsf_resource} where uniquename='%s' AND dbxref_id=%d and type_id=%d",
+      $name, $dbxref_id, $cvterm_id
+    ));
+  if (empty($res['resource_id'])) {
+    drupal_set_message(t('Failed to add software option %name.', array('%name' => $name)));
+    return FALSE;
+  }
+  return TRUE;
+}
+

@@ -1,0 +1,10 @@
+; $Id:$
+
+CHANGELOG
+
+25Sep10: First attempt to code something
+10Feb11: Decided to use BAM files for Illumina; Fixed css style
+12-14Feb11: Acquire BLAST data from DB; Added dbxref; coded popup windows
+
+TODO
+* Illumina as BAM files

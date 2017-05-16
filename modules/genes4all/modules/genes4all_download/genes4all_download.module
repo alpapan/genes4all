@@ -1,0 +1,511 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * The genes4all_download module provides an interface for downloading sequences from
+ * the Chado database
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/* @file
+ *  - gmod_dbsf_write_fastafile
+ *  - gmod_dbsf_create_uid
+ *  - new one to get feature/residues ->genes4all
+ *
+  --- select
+    - species
+    --- data type
+      --- contig
+      --- reads
+      --- assembly (both of contig reads)
+      --- peptides
+      --- annotation -> future
+    --- file type
+      --- fasta
+      --- genbank
+      --- gff3
+    --- ask compressed as zip
+    --- link
+  --- cron delete
+ */
+
+/**
+ * Implementation of hook_menu
+ */
+function genes4all_download_menu() {
+  $items = array();
+  $items['genes4all/download/request'] = array(
+    'title' => 'Download',
+    'page callback' => 'genes4all_download_download_page',
+    'access arguments' => array('Access genes4all_download'),
+    'description' => 'Request data download',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/download/result'] = array(
+    'title' => 'Download',
+    'page callback' => 'genes4all_download_result_page',
+    'page arguments' => array(3),
+    'access arguments' => array('Access genes4all_download'),
+    'description' => 'Download results',
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function genes4all_download_perm() {
+  return array('Access genes4all_download');
+}
+
+/**
+ * Produce HTML for the 'download page'.
+ *
+ * Menu genes4all/download
+ */
+function genes4all_download_download_page() {
+  $ic_gff2all = drupal_get_path('module', 'gmod_dbsf') .'/scripts/ic_gff2all.pl';
+  if (!file_exists($ic_gff2all)) {
+    drupal_set_message(t('Failed to find conversion script %script. Please '. l('contact', 'contact') .' the administrator.', array('%script' => $ic_gff2all)), 'error');
+    return FALSE;
+  }
+  elseif (!is_executable($ic_gff2all)) {
+    drupal_set_message(t('Failed to execute %exec', array('%exec' => $ic_gff2all)), 'error');
+    return FALSE;
+  }
+  $outfile = file_create_path() .'/downloads' . '/test.test';
+  // Test if it is writtable because we can't doing within a gmod_dbsf_db_execute
+  if (!$outhandle = fopen($outfile, 'at')) {
+    drupal_set_message(t('Could not create %outfile. Are correct permissions set?', array('%outfile' => $outfile)), 'error');
+    return FALSE;
+  }
+  else {
+    fclose($outhandle);
+    unlink($outfile);
+  }
+  $download_form = drupal_get_form('genes4all_download_download_form');
+  return $download_form;
+}
+
+/**
+ * Implements hook_form()
+ *
+ * Form for downloading data from database
+ * @see genes4all_download_download_form_validate()
+ * @see genes4all_download_download_form_submit()
+ * @ingroup forms
+ *
+ * @param $form_state
+ *   hook_form data
+ */
+function genes4all_download_download_form($form_state) {
+  $form = array();
+  $data_options = array(
+    'reads' => 'Reads included in an assembly',
+    'assembly' => 'Assembly (contigs & reads)',
+    'contig' => 'Just contigs',
+    'ORF' => 'Predicted Open Reading Frames',
+    'polypeptide' => 'Predicted Peptides',
+  );
+
+  $form['data'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Download data',
+    '#description' => t('You can batch download any data to which you have access to. If you wish to mirror the entire database, please '. l('contact', 'contact') .' an administrator.'),
+    'data_type' => array(
+      '#type' => 'radios',
+      '#default_value' => 'contig',
+      '#title' => 'Type of data',
+      '#options' => $data_options,
+      '#weight' => -1,
+      '#required' => TRUE,
+    ), 'compression' => array(
+      '#type' => 'checkbox',
+      '#title' => 'Use compression',
+      '#weight' => 5,
+      '#default_value' => TRUE,
+    ), 'file_type' => array(
+      '#type' => 'radios',
+      '#title' => 'File format',
+      '#weight' => 6,
+      '#options' => array('fasta' => 'FASTA', 'gff' => 'FASTA, GenBank & GFF3 (if available)'),
+      '#description' => t('Please note that if GFF is chosen, it might take a while to complete.'),
+      '#default_value' => 'fasta',
+    ),
+  );
+  $org_array = gmod_dbsf_db_execute('chado', 'gmod_dbsf_getspecies');
+  if (!empty($org_array['phylogeny_array'])){
+    $form['data']['species'] = gmod_dbsf_phylogeny_tree($org_array['phylogeny_array']);
+  }
+  $form['buttons'] = array(
+    '#weight' => 10,
+    'submit' => array(
+      '#type' => 'submit',
+      '#value' => t('Request download'),
+    ),
+  );
+  return $form;
+}
+
+/**
+ * Implements hook_form_validate()
+ *
+ * Form for downloading data from database
+ * @see genes4all_download_download_form()
+ * @see genes4all_download_download_form_submit()
+ * @ingroup forms
+ *
+ * @param $form
+ *   hook_form data
+ * @param $form_state
+ *   hook_form data
+ */
+function genes4all_download_download_form_validate($form, &$form_state) {
+  if (!empty($form_state['values'])) {
+    // new: check that submitted species is indeed allowed.
+    $org_array = gmod_dbsf_db_execute('chado', 'gmod_dbsf_getspecies');
+
+    foreach ($form_state['values'] as $key => $value) {
+      //HACK HACK HACK
+      if (is_array($value)) {
+        continue;
+      }
+      if (empty($value)) {
+        unset($form_state['values'][$key]);
+        continue;
+      }
+      if (preg_match('/^species-(\d+)/', $value, $matches)) {
+        if (empty($org_array['species_array'][$matches[1]])) {
+          // attempt to DOM hack: stop dead in your tracks
+          form_set_error('organism', t('You requested a species which you are not allowed access to.'));
+          return FALSE;
+        }
+
+        $form_state['values']['species_select'][$matches[1]] = $matches[1];
+        unset($form_state['values'][$key]);
+      }
+    }
+    if (empty($form_state['values']['species_select'])) {
+      form_set_error("phylogeny_select", t('You need to select at least one species.'));
+    }
+  }
+}
+
+/**
+ * Implements hook_form_submit()
+ *
+ * Form for downloading data from database
+ * @see genes4all_download_download_form_validate()
+ * @see genes4all_download_download_form()
+ * @ingroup forms
+ *
+ * @param $form
+ *   hook_form data
+ * @param $form_state
+ *   hook_form data
+ */
+function genes4all_download_download_form_submit($form, &$form_state) {
+  $data_type = $form_state['values']['data_type'];
+  // Genbank format is highly memory intensive to construct so default to fasta.
+  $file_type = !empty($form_state['values']['file_type']) ? $form_state['values']['file_type'] : 'fasta';
+  $compression = $form_state['values']['compression'];
+  //$species=gmod_dbsf_array2csv($form_state['values']['species_select']);
+  $sessionid  = session_id();
+  $timestamp  = time();
+  $form_uid   = gmod_dbsf_create_uid($sessionid, $timestamp, 'download');
+  $operations = array();
+  $max        = count($form_state['values']['species_select']);
+  foreach ($form_state['values']['species_select'] as $species) {
+    $operations[] = array('genes4all_download_get_data', array($form_uid, $species, $data_type, $max, $compression, $file_type));
+  }
+  $batch = array(
+    'title' => t('Preparing data...'),
+    'operations' => $operations,
+    'init_message' => t('Preparing download...'),
+    'progress_message' => t('@remaining species remaining...'),
+    'error_message' => t('Your download request encountered an error.'),
+    'finished' => 'genes4all_download_batch_finished',
+  );
+  batch_set($batch);
+  $form_state['redirect'] = array('genes4all/download/result', "submission_uid=$form_uid");
+  return "genes4all/download/result?submission_uid=$form_uid";
+}
+
+/**
+ * Get data from Chado as GFF or FASTA
+ *
+ * @param $variables
+ * associative array with data which includes 'organism',
+ *  'type','format' and 'outfile'. Also 'no_constituents'
+ *
+ * @return unknown_type
+ */
+function genes4all_download_bulk_get($variables) {
+  $organism_id     = !empty($variables['organism']) ? $variables['organism'] : $variables;
+  $data_type       = $variables['type'];
+  $outfile         = $variables['outfile'];
+  $format          = !empty($variables['format']) ? $variables['format'] : 'gff';
+  $no_constituents = !empty($variables['no_constituents']) ? $variables['no_constituents']:'';
+  if (empty($organism_id) || empty($data_type) || empty($outfile)) {
+    return FALSE;
+  }
+  $outhandle = fopen($outfile, 'at');
+  ini_set('auto_detect_line_endings', TRUE);
+  if ($format == 'gff') {
+    fwrite($outhandle, "##gff-version 3\n");
+  }
+
+  $fasta_array = array();
+  //Chado specific SQLs
+  $sql_primary = "select uniquename,residues from feature JOIN cvterm ON cvterm_id=type_id where "
+   . " organism_id = %d and  cvterm.name = '%s' and cvterm.cv_id=(select cv_id from cv where name='sequence') order by cvterm.name";
+  $sql_fasta = "SELECT residues from feature where uniquename='%s'";
+  $sql_prot2contig = 'select name from feature where type_id = '
+   . "(select cvterm_id from cvterm where name = 'contig' and cv_id=(select cv_id from cv where name='sequence'))"
+    . ' and feature_id IN (select srcfeature_id from featureloc where feature_id = ' . " (select feature_id from feature where uniquename = '%s'))";
+
+  $sql_assembly = 'select ref,source,type,fstart,fend,score,strand,phase,name,seqlen from gff3view_mat '
+   . " where ref = '%s' OR name = '%s' ORDER by type";
+  if (!empty($no_constituents)) {
+    $sql_assembly = 'select ref,source,type,fstart,fend,score,strand,phase,name,seqlen from gff3view_mat '
+     . " where name = '%s'";
+  }
+  $dbres_primary = db_query($sql_primary, $organism_id, $data_type);
+  while ($dbdata_primary = db_fetch_array($dbres_primary)) {
+    $residues = $dbdata_primary['residues'];
+    $feature = $dbdata_primary['uniquename'];
+
+    if ($format == 'fasta') {
+      if (!empty($residues)) {
+        fwrite($outhandle, ">$feature\n");
+        fwrite($outhandle, wordwrap("$residues\n", 80, "\n", TRUE));
+        continue 1;
+      }
+    }
+    $res = db_query($sql_assembly, $feature, $feature);
+    while ($dbdata = db_fetch_array($res)) {
+      $gff_array  = array();
+      $name_strip = str_replace('_assembly', '', $dbdata['name']);
+      $name       = $dbdata['name'];
+      $strand     = "+";
+      if ($dbdata['strand'] == -1 || $dbdata['strand'] == '-') {
+        $strand = '-';
+      }
+      $gff_array[$name] = array(
+        'ref' => $dbdata['ref'],
+        'source' => $dbdata['source'],
+        'type' => $dbdata['type'],
+        'fstart' => $dbdata['fstart'],
+        'fend' => $dbdata['fend'],
+        'score' => $dbdata['score'],
+        'strand' => $strand,
+        'phase' => $dbdata['phase'],
+      );
+
+      if ($dbdata['type'] == 'contig') {
+        $gff_array[$name]['ref'] = $name;
+        $gff_array[$name]['fstart'] = '1';
+        $gff_array[$name]['fend'] = $dbdata['seqlen'];
+        $gff_array[$name]['tags']['ID'] = $name;
+      }
+      elseif ($dbdata['type'] == 'read') {
+        $gff_array[$name]['tags']['ID'] = $name_strip;
+        $sql_read_target = 'select fstart,fend from gff3view_mat where ref='. "(select regexp_replace ('$name' , '_assembly','')) and name='$name'";
+        $result_read = db_query($sql_read_target);
+        $dbdata_read = db_fetch_array($result_read);
+        $gff_array[$name]['tags']['Target'] = $name_strip .' '. $dbdata_read['fstart'] .' '. $dbdata_read['fend'];
+        $gff_array[$name]['tags']['Parent'] = $dbdata['ref'];
+        $gff_array[$name]['tags']['#target']['id'] = $name_strip;
+        $gff_array[$name]['tags']['#target']['value'] = ' '. $dbdata_read['fstart'] .' '. $dbdata_read['fend'];
+      }
+      unset($dbdata);
+      $fasta_array[$name_strip] = 1;
+
+      foreach ($gff_array as $name => $value_array) {
+        $data = '';
+        foreach ($value_array as $column => $value) {
+          if (empty($value)) {
+            $value = '.';
+          }
+          if (is_array($value)) {
+            foreach ($value as $key => $r) {
+              // if it starts with a hash, ignore it.
+              if (strpos($key, '#') === FALSE) {
+                $data .= $key .'='. $r .';';
+              }
+            }
+          }
+          else {
+            $data .= $value ."\t";
+          }
+        }
+        $data = trim($data);
+        fwrite($outhandle, $data ."\n");
+      }
+    }
+  }
+  //end each feature
+  // force memory emptying
+  $res = '';
+  $dbres_primary = '';
+  if ($format != 'fasta') {
+    fwrite($outhandle, "##FASTA\n");
+    foreach ($fasta_array as $feature => $dummy) {
+      $fasta_res = db_fetch_array(db_query($sql_fasta, $feature));
+      if (!empty($fasta_res['residues'])) {
+        fwrite($outhandle, ">$feature\n");
+        fwrite($outhandle, wordwrap($fasta_res['residues'] ."\n", 80, "\n", TRUE));
+      }
+    }
+  }
+  fclose($outhandle);
+  return $outfile;
+}
+
+function genes4all_download_get_data($uid, $species, $data_type_str, $max, $compress, $file_type, &$context) {
+  if (empty($data_type_str) || empty($species)) {
+    return;
+  }
+  $ic_gff2all = drupal_get_path('module', 'gmod_dbsf') .'/scripts/ic_gff2all.pl';
+  set_time_limit(60);
+  $features      = array();
+  $sql_select    = '';
+  $dirpath       = file_create_path() .'/downloads';
+  $outfile       = $dirpath .'/'. $uid .'_'. $species;
+  $delivery_file = '';
+  $fasta_switch  = 0;
+  $suffix        = '.gff3';
+  if ($file_type == 'fasta') {
+    $fasta_switch = 1;
+    $suffix = '.fsa';
+  }
+
+  switch ($data_type_str) {
+    case 'reads':
+      $delivery_file = gmod_dbsf_db_execute('chado', 'genes4all_download_bulk_get', array('organism' => $species, 'type' => 'EST', 'outfile' => $outfile .'.fsa', 'format' => 'fasta'));
+      $fasta_switch = 1;
+      break;
+
+    case 'assembly':
+      //TODO WARNING REQUIRED PATCHING /usr/local/share/perl/5.10.0/Bio/Tools/GFF.pm line 323
+      $delivery_file = gmod_dbsf_db_execute('chado', 'genes4all_download_bulk_get', array('organism' => $species, 'type' => 'contig', 'outfile' => $outfile . $suffix, 'format' => $file_type));
+      break;
+
+    case 'contig':
+      $delivery_file = gmod_dbsf_db_execute('chado', 'genes4all_download_bulk_get', array('organism' => $species, 'type' => $data_type_str, 'outfile' => $outfile . $suffix, 'no_constituents' => TRUE, 'format' => $file_type));
+      break;
+
+    case 'ORF':
+      $delivery_file = gmod_dbsf_db_execute('chado', 'genes4all_download_bulk_get', array('organism' => $species, 'type' => $data_type_str, 'outfile' => $outfile .'.fsa', 'format' => 'fasta'));
+      $fasta_switch = 1;
+      break;
+
+    case 'polypeptide':
+      $delivery_file = gmod_dbsf_db_execute('chado', 'genes4all_download_bulk_get', array('organism' => $species, 'type' => $data_type_str, 'outfile' => $outfile .'.fsa', 'format' => 'fasta'));
+      $fasta_switch = 1;
+      break;
+  }
+  if (empty($delivery_file) || !file_exists($delivery_file)) {
+    drupal_set_message(t('Could not find your outfile.'), 'error');
+    return FALSE;
+  }
+  $context['results']['species'][$species] = $delivery_file;
+  $context['results']['uid'] = $uid;
+  $exec_out = '';
+  if (empty($fasta_switch)) {
+    $args = ' -g -f ';
+    if (!empty($compress)) {
+      $context['results']['compress'] = TRUE;
+      $args .= ' -compress';
+    }
+    $result = exec($ic_gff2all ." -i $delivery_file". $args, $exec_out);
+  }
+  else {
+    $context['results']['fasta'] = TRUE;
+    if (!empty($compress)) {
+      $context['results']['compress'] = TRUE;
+      $result = exec("gzip -9 $delivery_file", $exec_out);
+    }
+  }
+  return TRUE;
+}
+
+function genes4all_download_batch_finished($success, $results, $operations) {
+  if (!empty($success)) {
+    $uid = $results['uid'];
+  }
+  else {
+    $error_operation = reset($operations);
+    $message = t('An error occurred while processing your request. Please '. l('contact', 'contact') ." the administrator, reporting: $uid.");
+    return FALSE;
+  }
+  return TRUE;
+}
+
+function genes4all_download_result_page($submission_uid = NULL) {
+  if (empty($submission_uid)) {
+    $submission_uid = $_GET['submission_uid'];
+    if (empty($submission_uid)) {
+      return 'No submission data provided';
+    }
+  }
+  $return_text = '<h3>Download datasets</h3><p>Your downloads are available below.</p><ul>';
+  //files directory with downloads
+  $basepath = file_create_path();
+  $dirpath  = $basepath .'/downloads';
+  $data     = array();
+  $gffs     = file_scan_directory($dirpath, "^$submission_uid.+\.gff3\.?g?z?$", array('.', '..', 'CVS'), NULL, FALSE);
+  $fastas   = file_scan_directory($dirpath, "^$submission_uid.+\.fsa\.?g?z?$", array('.', '..', 'CVS'), NULL, FALSE);
+  $gbs      = file_scan_directory($dirpath, "^$submission_uid.+\.gb\.?g?z?$", array('.', '..', 'CVS'), NULL, FALSE);
+  $org_hash = array();
+  $return_text .= '<li>FASTA files</li><ul>';
+  foreach ($fastas as $filename => $data) {
+    $gff_produced = 1;
+    preg_match('/_(\d+)\.\w{2,5}\.?g?z?$/', $filename, $org_id);
+    $org_decyphered = gmod_dbsf_db_execute('chado', 'gmod_dbsf_decypher_organism_id', $org_id[1]);
+    $org_hash[$org_id[1]] = !empty($org_hash[$org_id[1]]) ? $org_hash[$org_id[1]] : $org_decyphered;
+    $species_array = $org_hash[$org_id[1]];
+    $species_str = '<i>'. $species_array['genus'] .' '. $species_array['species'] .'</i>';
+    $return_text .= l("<li>Data for $species_str</li>", base_path() . $filename, array('html' => TRUE, 'external' => TRUE));
+  }
+  if (!empty($gbs)) {
+    $return_text .= '</ul><li>GenBank files</li><ul>';
+    foreach ($gbs as $filename => $data) {
+      preg_match('/_(\d+)\.\w{2,5}\.?g?z?$/', $filename, $org_id);
+      $org_decyphered = gmod_dbsf_db_execute('chado', 'gmod_dbsf_decypher_organism_id', $org_id[1]);
+      $org_hash[$org_id[1]] = !empty($org_hash[$org_id[1]]) ? $org_hash[$org_id[1]] : $org_decyphered;
+      $species_array = $org_hash[$org_id[1]];
+      $species_str = '<i>'. $species_array['genus'] .' '. $species_array['species'] .'</i>';
+      $return_text .= l("<li>Data for $species_str</li>", base_path() . $filename, array('html' => TRUE, 'external' => TRUE));
+    }
+  }
+  if (!empty($gffs)) {
+    $return_text .= '</ul><li>GFF files</li><ul>';
+    foreach ($gffs as $filename => $data) {
+      preg_match('/_(\d+)\.\w{2,5}\.?g?z?$/', $filename, $org_id);
+      $org_decyphered = gmod_dbsf_db_execute('chado', 'gmod_dbsf_decypher_organism_id', $org_id[1]);
+      $org_hash[$org_id[1]] = !empty($org_hash[$org_id[1]]) ? $org_hash[$org_id[1]] : $org_decyphered;
+      $species_array = $org_hash[$org_id[1]];
+      $species_str = '<i>'. $species_array['genus'] .' '. $species_array['species'] .'</i>';
+      $return_text .= l("<li>Data for $species_str</li>", base_path() . $filename, array('html' => TRUE, 'external' => TRUE));
+    }
+  }
+  return $return_text .'</ul></ul>';
+}
+
+/**
+ * Implement hook_cron()
+ *
+ * Finds temporary files
+ */
+function genes4all_download_cron() {
+  //not sure if this is to be @ .module or .install (probably .module)
+  $dirpath = file_create_path() .'/downloads';
+  file_scan_directory($dirpath, '.+\.gff3$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.fasta$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.gb$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+}
+

@@ -1,0 +1,838 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Drupal Bioinformatic Server framework Module
+ *
+ * A BLAST dataset must be formated with formatdb -o T
+ * in order to use the fastacmd fetching of accession IDs.
+ *
+ * Developed by Alexie Papanicolaou
+ * University of Exeter.
+ * @see http://insectacentral.org
+ */
+
+/**
+ * @file
+ * caution. Tabs needs the following settings to be set at /admin/settings/tabs due to tabs' bugs
+ * navigation buttons: enabled ; descriptive tab URLs: enabled.
+ * internet explorer 7 has a bug with double row tabs. use IE8
+ */
+
+/**
+ * Implements hook_init().
+ */
+function biosoftware_bench_init() {
+  drupal_add_css(drupal_get_path('module', 'gmod_dbsf') .'/gmod_dbsf.css', 'module');
+}
+
+/**
+ * Implements hook_perm().
+ */
+function biosoftware_bench_perm() {
+  $perms = array('Access biosoftware_bench', 'Add new dataset paths', 'Access BLAST Server', 'Allow sequence retrieval', 'Administrate BLAST Server', 'Administrate biosoftware_bench');
+  //PLUGIN_EDIT_HERE
+  if (file_exists(drupal_get_path('module', 'biosoftware_bench') .'/includes/biosoftware_bench_ssaha2.inc')) {
+    $perms[] = 'Access SSAHA2 Server';
+    $perms[] = 'Administrate SSAHA2 Server';
+  }
+  if (file_exists(drupal_get_path('module', 'biosoftware_bench') .'/includes/biosoftware_bench_iprscan.inc')) {
+    $perms[] = 'Access InterProScan Server';
+    $perms[] = 'Administrate InterProScan Server';
+  }
+  if (file_exists(drupal_get_path('module', 'biosoftware_bench') .'/includes/biosoftware_bench_annot8r.inc')) {
+    $perms[] = 'Access annot8r Server';
+    $perms[] = 'Administrate annot8r Server';
+  }
+  return $perms;
+}
+
+/**
+ * Implement hook_theme()
+ */
+function biosoftware_bench_theme() {
+  $themes = array(
+    'biosoftware_bench_blast_result_form' => array(
+      'arguments' => array('form'),
+      'function' => 'biosoftware_bench_software_result_form',
+    ),
+    //PLUGIN_EDIT_HERE
+    'biosoftware_bench_ssaha2_result_form' => array(
+      'arguments' => array('form'),
+      'function' => 'biosoftware_bench_software_result_form',
+    ), 'biosoftware_bench_iprscan_result_form' => array(
+      'arguments' => array('form'),
+      'function' => 'biosoftware_bench_software_result_form',
+    ), 'biosoftware_bench_annot8r_result_form' => array(
+      'arguments' => array('form'),
+      'function' => 'biosoftware_bench_software_result_form',
+    ),
+  );
+  return ($themes);
+}
+
+/**
+ * Implements hook_menu().
+ *
+ * If it finds plugin files, it adds them too.
+ */
+function biosoftware_bench_menu() {
+  $items = array();
+
+  $items['bench/get_sequences'] = array(
+    'file' => 'includes/biosoftware_bench_get_seq.inc',
+    'title' => 'Retrieve sequences',
+    'page callback' => 'biosoftware_bench_get_sequence',
+    'page arguments' => array(2, 3),
+    'access arguments' => array('Allow sequence retrieval'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['bench/select'] = array(
+    'title' => 'Select software to use',
+    'page callback' => 'biosoftware_bench_software_select_page',
+    'access arguments' => array('Access biosoftware_bench'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['admin/settings/bench'] = array(
+    'file' => 'includes/biosoftware_bench_admin.inc',
+    'title' => 'Bioinformatic Software Bench settings',
+    'page callback' => 'biosoftware_bench_admin_page',
+    'access arguments' => array('Administrate biosoftware_bench'),
+    'description' => 'Configure the module',
+    // needed in order to appear at /admin/settings
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/bench/software'] = array(
+    'file' => 'includes/biosoftware_bench_admin.inc',
+    'title' => 'Administrate software for the biosoftware_bench',
+    'page callback' => 'biosoftware_bench_admin_software_page',
+    'access arguments' => array('Administrate biosoftware_bench'),
+    'description' => 'Configure which software are made available via the Bioinformatic Software Bench',
+    'type' => MENU_CALLBACK,
+  );
+  $items['admin/bench/dataset'] = array(
+    'file' => 'includes/biosoftware_bench_admin.inc',
+    'title' => 'Administrate datasets/db for the Bioinformatic Software Bench',
+    'page callback' => 'biosoftware_bench_admin_dataset_page',
+    'access arguments' => array('Administrate biosoftware_bench'),
+    'description' => 'Configure which datasets/databases are loaded for the Bioinformatic Software Bench',
+    'type' => MENU_CALLBACK,
+  );
+
+
+  $plugin_path = drupal_get_path('module', 'biosoftware_bench') .'/includes';
+  //PLUGIN_EDIT_HERE
+  if (file_exists($plugin_path .'/biosoftware_bench_blastall.inc')) {
+    require_once($plugin_path .'/biosoftware_bench_blastall.inc');
+    $new_items = biosoftware_bench_blastall_menu();
+    $items = array_merge((array)$items, (array)$new_items);
+  }
+  if (file_exists($plugin_path .'/biosoftware_bench_ssaha2.inc')) {
+    require_once($plugin_path .'/biosoftware_bench_ssaha2.inc');
+    $new_items = biosoftware_bench_ssaha2_menu();
+    $items = array_merge((array)$items, (array)$new_items);
+  }
+  if (file_exists($plugin_path .'/biosoftware_bench_iprscan.inc')) {
+    require_once($plugin_path .'/biosoftware_bench_iprscan.inc');
+    $new_items = biosoftware_bench_iprscan_menu();
+    $items = array_merge((array)$items, (array)$new_items);
+  }
+  if (file_exists($plugin_path .'/biosoftware_bench_annot8r.inc')) {
+    require_once($plugin_path .'/biosoftware_bench_annot8r.inc');
+    $new_items = biosoftware_bench_annot8r_menu();
+    $items = array_merge((array)$items, (array)$new_items);
+  }
+  return $items;
+}
+
+/**
+ * Produce HTML for the 'select software page'.
+ *
+ * Menu biosoftware_bench/select
+ */
+function biosoftware_bench_software_select_page() {
+  $software_avail = array();
+  $software_res   = db_query('SELECT uniquename,description from {gmod_dbsf_software} as software where active is true');
+  $check_menu     = "select link_path from {menu_links} where link_path='%s'";
+  $sorry          = t('Sorry, but the administrator has not activated any software.');
+  while ($row = db_fetch_array($software_res)) {
+    $software_avail[$row['uniquename']] = $row['description'];
+  }
+  if (empty($software_avail)) {
+    drupal_set_message($sorry, 'error');
+    return ' ';
+  }
+  $links = '';
+  foreach ($software_avail as $name => $description) {
+    //check if menu exists.
+    $menu_check = db_fetch_array(db_query($check_menu, 'bench/'. $name));
+    if (!empty($menu_check)) {
+      $links .= "<dt>". l(strtoupper($name), 'bench/'. $name) .'</dt><dd>'. $description .'</dd>';
+    }
+  }
+  if (empty($links)) {
+    drupal_set_message($sorry, 'error');
+    return ' ';
+  }
+  return '<dl>'. $links .'</dl>';
+}
+
+/**
+ * Helper function to check if a software is active
+ *
+ * @param $software
+ *   ID or uniquename of software to check.
+ *
+ * @return
+ *   TRUE if software is active, FALSE otherwise or on failure
+ */
+function biosoftware_bench_check_software_active($software) {
+  if (empty($software)) {
+    return FALSE;
+  }
+  $active_sql = "SELECT active from {gmod_dbsf_software} as software where ";
+  if (is_numeric($software)) {
+    $active_sql .= " software_id=%d";
+  }
+  else {
+    $active_sql .= " uniquename='%s'";
+  }
+  $res = db_fetch_array(db_query($active_sql, $software));
+  if ($res['active'] == 'f') {
+    return FALSE;
+  }
+  else {
+    return TRUE;
+  }
+}
+
+/**
+ * Get drupal roles, optionally with a limit
+ *
+ * @param $limit
+ *   Optionally add a limit. It can be a two element array with first element
+ *   to act as the column name and second as the value. or it can be a string
+ *   to be added after WHERE.
+ *
+ * @return
+ *   FALSE on failure or an associative array of names with role.rid as key
+ */
+function biosoftware_bench_get_role($limit = NULL) {
+  $role_array = array();
+  $sql_select = "SELECT rid,name from {role}";
+  if (!empty($limit)) {
+    if (is_array($limit)) {
+      $sql_select .= " WHERE $limit[0]=$limit[1]";
+    }
+    else {
+      $sql_select .= " WHERE $limit";
+    }
+  }
+  $db_results = db_query($sql_select);
+  while ($dbdata = db_fetch_array($db_results)) {
+    $role_array[$dbdata['rid']] = $dbdata['name'];
+  }
+  if (!empty($role_array)) {
+    return $role_array;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Get software options, their values and the FAPI type
+ *
+ * @param $software_name
+ *   Name of software to generate options for
+ *
+ * @return
+ *   An 2D associative array. Primary key is option name and 2nd key is
+ *   'options' and 'type'. Content of options is a list array and type is
+ *   a string.
+ */
+function biosoftware_bench_generate_options($software_name) {
+  if (empty($software_name)) {
+    return FALSE;
+  }
+  $return_array = array();
+  $resources = gmod_dbsf_get_software_resources(array('s.uniquename' => $software_name, 'rcvterm.name' => 'software option'), TRUE);
+
+  if (empty($resources[$software_name])) {
+    //drupal_set_message(t('Sorry, cannot find any options for %software_name stored in the database',array('%software_name'=>$software_name)), 'error');
+    return FALSE;
+  }
+  foreach ($resources[$software_name] as $id => $base_data) {
+    $name = $base_data['uniquename'];
+    $extra_data = gmod_dbsf_get_resource_cvterm_and_prop($id);
+    if (empty($extra_data['cvterm']['input type'])) {
+      continue;
+      //not an option
+    }
+
+    //Format option array as it will be expected for form API
+    if ($name == 'query genetic code' || $name == 'DB genetic code') {
+      $return_array[$name]['options'] = $extra_data['prop']['software option'];
+    }
+    elseif (!empty($extra_data['prop']['software option'])) {
+      foreach ($extra_data['prop']['software option'] as $value) {
+        $return_array[$name]['options'][$value] = $value;
+      }
+    }
+    $return_array[$name]['type'] = implode('', $extra_data['cvterm']['input type']);
+    $return_array[$name]['description'] = $base_data['description'];
+  }
+  //  dpm($return_array);
+  return $return_array;
+}
+
+/**
+ * Format a FASTA file for BLAST
+ *
+ * @param $infile
+ *   Full path to file to format.
+ * @param $file_type
+ *   Either 'protein' or 'nucleotide'
+ *
+ * @return
+ *   Returns output of formatdb, or FALSE upon failure
+ */
+function biosoftware_bench_formatdb_fastafile($infile, $file_type = 'protein') {
+  if (empty($infile) || !file_exists($infile)) {
+    return FALSE;
+  }
+  $is_protein = 'T';
+  if ($file_type == 'protein') {
+    $is_protein = 'T';
+  }
+  else {
+    $is_protein = 'F';
+  }
+  $select_software_setting = 'SELECT value FROM {gmod_dbsf_softwareprop} as softwareprop where software_id=' . "(SELECT software_id from {gmod_dbsf_software} as software where uniquename='%s')" . ' AND rank=0 AND type_id=' . "(SELECT cvterm_id from {gmod_dbsf_cvterm} as cvterm JOIN {gmod_dbsf_cv} as cv on cv.cv_id=cvterm.cv_id" . " where cv.name='software_setting' AND cvterm.name='%s')";
+  $res = db_fetch_array(db_query($select_software_setting, 'formatdb', 'executable'));
+  $formatdb_exec = $res['value'];
+  if (empty($formatdb_exec)) {
+    drupal_set_message(t('The administrator has not activated the formatdb program yet.'), 'error');
+    return FALSE;
+  }
+  // run formatdb as a child
+  $args = " -p $is_protein -o T -i $infile -l /dev/stdout";
+  $result = exec($formatdb_exec . $args);
+  return $result;
+}
+
+/**
+ * Get software datasets available to visitor/user
+ *
+ * @param $software_name
+ *   Name of software to get datasets for
+ *
+ * @return
+ *   FALSE on failure and a 3D associative array if successful. The array
+ *   structure is like so:
+ *   [dbtype][dbgroup][id] = name
+ */
+function biosoftware_bench_get_user_datasets($software_name = 'blastall') {
+  if (empty($software_name)) {
+    return FALSE;
+  }
+  $return_array = array();
+  global $user;
+  // an array of all the roles a user has.
+  $user_roles = array_merge((array)$user->name, (array)$user->roles);
+  $dataset_array = gmod_dbsf_get_software_resources(
+    array('s.uniquename' => $software_name, 'rcvterm.name' => 'dataset'), TRUE
+  );
+  if (empty($dataset_array) || empty($dataset_array[$software_name])) {
+    return FALSE;
+  }
+  $dataset_array = $dataset_array[$software_name];
+  foreach ($dataset_array as $name => $db_data) {
+    $id             = $db_data['id'];
+    $dbroles        = biosoftware_bench_get_resource_roles($id);
+    $security_check = array_intersect($user_roles, $dbroles);
+    if (!empty($dbroles) && empty($security_check)) {
+      continue;
+    }
+    $dbgroup = '';
+    $data = gmod_dbsf_get_resource_cvterm_and_prop($id);
+    if (empty($data['cvterm']['dataset_type'])) {
+      continue;
+    }
+    $linked_data = gmod_dbsf_get_linked_resources($id, 'uses', FALSE, "rocvterm.name='dataset_group'");
+    if (!empty($linked_data)) {
+      foreach ($linked_data as $lid => $d) {
+        $dbgroup = $d['uniquename'];
+      }
+    }
+    $dbtype_array = $data['cvterm']['dataset_type'];
+    foreach ($dbtype_array as $dbtype) {
+      $return_array[$dbtype][$dbgroup][$id] = $name;
+      if (!empty($db_data['organism_id'])) {
+        $return_array['species'][$dbtype][$dbgroup][$db_data['organism_id']][$id] = $name;
+      }
+    }
+  }
+
+  //sort resulting data
+  $return_array2 = array();
+  foreach ($return_array as $dbtype => $group_array) {
+    ksort($group_array, SORT_STRING);
+    foreach ($group_array as $dbgroup => $value_array) {
+      asort($value_array, SORT_STRING);
+      $return_array2[$dbtype][$dbgroup] = $value_array;
+    }
+  }
+  $return_array = $return_array2;
+  unset($return_array2);
+
+  if (!empty($return_array)) {
+    return $return_array;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Implement hook_cron()
+ *
+ * Finds & deletes temporary files
+ */
+function biosoftware_bench_cron() {
+  $dirpath = file_create_path() .'/bench';
+  file_scan_directory($dirpath, '.+\.query$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.subject.*', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.wait$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.done$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.parameter$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.output.*', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.submission$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  file_scan_directory($dirpath, '.+\.get$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+  //SSAHA Uncompressed head
+  file_scan_directory($dirpath, '.+\.head$', array('.', '..', 'CVS'), 'gmod_dbsf_delete_temp', FALSE);
+}
+
+/**
+ * Get all software
+ *
+ * @param $limit
+ *   Optionally add a limit. It can be an assoc. array where key is column,
+ *   value is constraint or a string to append with an AND
+ * @param $name_as_key
+ *   If TRUE then return array has uniquename as the key and id as the value.
+ *
+ * @return
+ *   An associative array of data with ID as key unless $name_as_key is set. FALSE on failure
+ */
+function biosoftware_bench_get_software($limit = NULL, $name_as_key = NULL) {
+  $return_array = array();
+  $sql_select = "SELECT software_id,uniquename from {gmod_dbsf_software} WHERE TRUE ";
+  if (!empty($limit)) {
+    if (is_array($limit)) {
+      foreach ($limit as $column => $data) {
+        if ($column === 'active' && empty($data)) {
+          $sql_select .= ' AND active is FALSE';
+        }
+        elseif ($column === 'active') {
+          $sql_select .= ' AND active is TRUE';
+        }
+        else {
+          $sql_select .= " AND $column='$data'";
+        }
+      }
+    }
+    else {
+      $sql_select .= " AND $limit";
+    }
+  }
+
+  $res = db_query($sql_select);
+  while ($row = db_fetch_array($res)) {
+    if (!empty($name_as_key) && $name_as_key === 'BOTH') {
+      $return_array[$row['uniquename']] = $row['uniquename'];
+    }
+    elseif (!empty($name_as_key)) {
+      $return_array[$row['uniquename']] = $row['software_id'];
+    }
+    else {
+      $return_array[$row['software_id']] = $row['uniquename'];
+    }
+  }
+  if (!empty($return_array)) {
+    return $return_array;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Get roles linked to a specific  resource
+ *
+ * @param $resource id
+ *  ID or uniquename of resource to get data for
+ * @param $name_as_key
+ *  If TRUE, return array is not indexed by id but by the name of roles
+ *
+ * @return
+ *   An associative array with id and name of roles. The key is controlled by
+ *   $name_as_key
+ */
+function biosoftware_bench_get_resource_roles($resource, $name_as_key = NULL) {
+  $return_array = array();
+  if (empty($resource)) {
+    return FALSE;
+  }
+  $resource = check_plain($resource);
+  $sql_select = 'SELECT rr.role_id,r.name as role_name ' . 'from {gmod_dbsf_resource_role} as rr ' . ' JOIN {role} as r ON r.rid=rr.role_id ';
+
+  if (is_numeric($resource)) {
+    $sql_select .= 'WHERE rr.resource_id=' . '%d';
+  }
+  else {
+    $sql_select .= "WHERE rr.resource_id=(SELECT resource_id from {gmod_dbsf_resource} where uniquename='%s')";
+  }
+  $res = db_query($sql_select, $resource);
+  while ($row = db_fetch_array($res)) {
+    if (!empty($name_as_key)) {
+      $return_array[$row['role_name']] = $row['role_id'];
+    }
+    else {
+      $return_array[$row['role_id']] = $row['role_name'];
+    }
+  }
+
+  if (!empty($return_array)) {
+    return $return_array;
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Get full path to a dataset
+ *
+ * @param $dataset
+ *   Dataset to get path for
+ *
+ * @return
+ *   Full path to directory.
+ */
+function biosoftware_bench_get_dataset_path($dataset) {
+  if (empty($dataset)) {
+    return FALSE;
+  }
+  $dataset     = check_plain($dataset);
+  $linked_data = gmod_dbsf_get_linked_resources($dataset, 'uses');
+  $dir         = '';
+  $basename    = '';
+  if (empty($linked_data)) {
+    drupal_set_message(t('There has been a problem getting the path to a dataset. Please report the error.'), 'error');
+    return;
+  }
+  foreach ($linked_data as $d) {
+    switch ($d['type_name']) {
+      case 'filename':
+        $basename = $d['uniquename'];
+        break;
+
+      case 'directory':
+        $dir = $d['uniquename'];
+        break;
+    }
+  }
+  return $dir . $basename;
+}
+
+function biosoftware_bench_dataset_phylogeny($species_dbs) {
+  if (empty($species_dbs)) {
+    return;
+  }
+  static $ic_phylogeny_loaded = FALSE;
+  if ($ic_phylogeny_loaded !== TRUE) {
+    drupal_add_css(drupal_get_path('module', 'gmod_dbsf') .'/includes/dynatree/skin/ui.dynatree.css', 'module', 'all', FALSE);
+    jquery_ui_add('ui.core');
+    drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/dynatree/jquery.dynatree.min.js');
+    drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/gmod_dbsf_phylogeny_tree.js');
+    $ic_phylogeny_loaded = TRUE;
+  }
+  $species_dbs2 = array();
+  //restructure species dbs to be with algorithm as the key
+  foreach ($species_dbs as $data_type => $db_data) {
+    if ($data_type == 'nucleotide') {
+      $species_dbs2['blastn'] = $db_data;
+      $species_dbs2['tblastn'] = $db_data;
+      $species_dbs2['tblastx'] = $db_data;
+    }
+    elseif ($data_type == 'protein') {
+      $species_dbs2['blastp'] = $db_data;
+      $species_dbs2['blastx'] = $db_data;
+    }
+  }
+  $species_dbs = $species_dbs2;
+  unset($species_dbs2);
+
+  // start form
+  $form = array('#weight' => 5);
+
+  $species_index = 1;
+  $form['species_select'] = array(
+    '#title' => 'Subject database via phylogeny',
+    '#description' => 'Optionally, you may <strong>add</strong> subject databases for one or more algorithms using the following taxonomy. This only applies to databases that the administrator has assigned a species. The selections are additive to whatever you selected above, and you will still need to provide the query sequence(s) for algorithms you wish to run.',
+    '#type' => 'fieldset',
+    '#tree' => FALSE,
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+  );
+  $form['species_select'][$species_index] = array(
+    '#type' => 'markup',
+    '#value' => '<div id="checktree"><ul id="root">',
+    '#weight' => -35,
+  );
+  $species_index++;
+
+
+  //proceed with tree building
+  foreach ($species_dbs as $algorithm => $db_data) {
+    $form['species_select'][$species_index] = array(
+      '#parents' => array('phylogeny_select', 'algorithm', $algorithm),
+      '#type' => 'checkbox',
+      '#title' => $algorithm,
+      '#return_value' => 'algorithm-'. $algorithm,
+      '#attributes' => array('class' => 'hidden-checkbox'),
+      '#weight' => $species_index,
+      '#prefix' => "<li data='icon: false,expand: true' />",
+    );
+    $species_index++;
+    $form['species_select'][$species_index] = array(
+      '#type' => 'markup',
+      '#value' => "<ul id='$algorithm'>",
+      '#weight' => $species_index,
+    );
+    $species_index++;
+
+
+    foreach ($db_data as $group => $org_data) {
+      $species_ids = array();
+      foreach ($org_data as $org_id => $data) {
+        $species_ids[] = $org_id;
+      }
+      $phylogeny_array = gmod_dbsf_getspecies($species_ids);
+      $phylogeny_array = $phylogeny_array['phylogeny_array'];
+      $form['species_select'][$species_index] = array(
+        '#parents' => array('phylogeny_select', 'group', $group),
+        '#type' => 'checkbox',
+        '#title' => $group,
+        '#return_value' => 'group-'. $group,
+        '#attributes' => array('class' => 'hidden-checkbox'),
+        '#weight' => $species_index,
+        '#prefix' => "<li data='icon: false,expand: false' />",
+      );
+      $species_index++;
+      $form['species_select'][$species_index] = array(
+        '#type' => 'markup',
+        '#value' => "<ul id='$group'>",
+        '#weight' => $species_index,
+      );
+      $species_index++;
+      foreach ($phylogeny_array as $class => $order_array) {
+        if (empty($order_array)) {
+          continue;
+        }
+        $form['species_select'][$species_index] = array(
+          //Parents shows up in the form results
+          '#parents' => array('phylogeny_select', 'class', $class),
+          '#type' => 'checkbox',
+          '#title' => $class,
+          '#return_value' => 'class-'. $class,
+          '#attributes' => array('class' => 'hidden-checkbox'),
+          '#weight' => $species_index,
+          '#prefix' => "<li data='icon: false,expand: false' />",
+        );
+        $species_index++;
+        $form['species_select'][$species_index] = array(
+          '#type' => 'markup',
+          '#value' => "<ul id='$class'>",
+          '#weight' => $species_index,
+        );
+        $species_index++;
+        foreach ($order_array as $order => $family_array) {
+          if (empty($family_array)) {
+            continue;
+          }
+          $form['species_select'][$species_index] = array(
+            '#parents' => array('phylogeny_select', 'order', $order),
+            '#type' => 'checkbox',
+            '#title' => $order,
+            '#return_value' => 'order-'. $order,
+            '#attributes' => array('class' => 'hidden-checkbox'),
+            '#weight' => $species_index,
+            '#prefix' => "<li data='icon: false' />",
+          );
+          $species_index++;
+          $form['species_select'][$species_index] = array(
+            '#type' => 'markup',
+            '#value' => "<ul id='$order'>",
+            '#weight' => $species_index,
+          );
+          $species_index++;
+          foreach ($family_array as $family => $species_data) {
+            if (empty($species_data)) {
+              continue;
+            }
+            $form['species_select'][$species_index] = array(
+              '#parents' => array('phylogeny_select', 'family', $family),
+              '#type' => 'checkbox',
+              '#attributes' => array('class' => 'hidden-checkbox'),
+              '#title' => $family,
+              '#return_value' => 'family-'. $family,
+              '#weight' => $species_index,
+              '#prefix' => "<li data='icon: false' />",
+            );
+            $species_index++;
+            $form['species_select'][$species_index] = array(
+              '#type' => 'markup',
+              '#value' => "<ul id='$family'>",
+              '#weight' => $species_index,
+            );
+            $species_index++;
+            foreach ($species_data as $species_id => $species_name) {
+              if (empty($org_data[$species_id])) {
+                continue;
+              }
+              $form['species_select'][$species_index] = array(
+                '#parents' => array('phylogeny_select', 'species', $species_id),
+                '#type' => 'checkbox',
+                '#title' => $species_name,
+                '#return_value' => 'species-'. $species_id,
+                '#attributes' => array('class' => 'hidden-checkbox'),
+                '#weight' => $species_index,
+                '#prefix' => "<li data='icon: false' />",
+              );
+              $species_index++;
+              $form['species_select'][$species_index] = array(
+                '#type' => 'markup',
+                '#value' => "<ul id='$species_id'>",
+                '#weight' => $species_index,
+              );
+              $species_index++;
+              foreach ($org_data[$species_id] as $db_id => $dbname) {
+                $form['species_select'][$species_index] = array(
+                  //'#parents' => array('phylogeny_select','dataset',$dbname),
+                  '#type' => 'checkbox',
+                  '#title' => $dbname,
+                  '#return_value' => $algorithm .'-dataset-'. $db_id,
+                  '#attributes' => array('class' => 'hidden-checkbox'),
+                  '#weight' => $species_index,
+                  '#prefix' => "<li data='icon: false' id='$species_index'/>",
+                );
+                $species_index++;
+              }
+              $form['species_select'][$species_index] = array(
+                '#type' => 'markup',
+                '#value' => "</ul id='$species_id'>",
+                '#weight' => $species_index,
+              );
+              $species_index++;
+            }
+            $form['species_select'][$species_index] = array(
+              '#type' => 'markup',
+              '#value' => "</ul id='$family'>",
+              '#weight' => $species_index,
+            );
+            $species_index++;
+          }
+
+          $form['species_select'][$species_index] = array(
+            '#type' => 'markup',
+            '#value' => "</ul id='$order'>",
+            '#weight' => $species_index,
+          );
+          $species_index++;
+        }
+
+        $form['species_select'][$species_index] = array(
+          '#type' => 'markup',
+          '#value' => "</ul id='$class'>",
+          '#weight' => $species_index,
+        );
+        $species_index++;
+      }
+      $form['species_select'][$species_index] = array(
+        '#type' => 'markup',
+        '#value' => "</ul id='$group'>",
+        '#weight' => $species_index,
+      );
+      $species_index++;
+    }
+    $form['species_select'][$species_index] = array(
+      '#type' => 'markup',
+      '#value' => "</ul id='$algorithm'>",
+      '#weight' => $species_index,
+    );
+    $species_index++;
+  }
+
+
+  $form['species_select'][$species_index] = array(
+    '#type' => 'markup',
+    '#weight' => $species_index,
+    '#value' => '</ul id="root"></div id="checktree">',
+  );
+  $species_index++;
+
+  return $form;
+}
+
+/**
+ * Theme software result form
+ *
+ * @see biosoftware_bench_blast_result_form()
+ *
+ * @param $form
+ *   Form API form variable which will be themed.
+ *
+ * @return
+ *   String with HTML of themed form.
+ */
+function biosoftware_bench_software_result_form($form) {
+  $table_array = $form['data']['#value'];
+  if (empty($table_array['data'])) {
+    return FALSE;
+  }
+  // Sortable sorttable actually does not work in our table because it has been converted to a form. this should be fixed by someone with javascript knowledge.
+  //drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/gmod_dbsf_sorttable.js');
+  $output = '';
+  $checkall = theme('table_select_header_cell');
+  $table_array['header'][0] = array('data' => $table_array['header'][0], 'class' => $checkall['class']);
+  $row_checked = array();
+  $weight_series = 0;
+  foreach ($table_array['data'] as $value) {
+    $render = drupal_render($form['features'][$weight_series]);
+    $row_checked[] = array(
+      'data' => array_merge((array)$render, array_slice($value, 1)),
+    );
+    $weight_series++;
+  }
+  $output .= '<p>';
+  if (!empty($table_array['#links']['previous'])) {
+    $output .= $table_array['#links']['previous'];
+  }
+  if (!empty($table_array['#links']['next'])) {
+    $output .= $table_array['#links']['next'];
+  }
+  if (!empty($table_array['#links']['bookmark'])) {
+    $output .= $table_array['#links']['bookmark'];
+  }
+  $output .= '</p>';
+  $output .= theme_table($table_array['header'], $row_checked, $table_array['attributes'], $table_array['caption']);
+  //TODO this may no longer work with drupal 6. must delete all non-# form items and render the entire form array
+  $output .= drupal_render($form['buttons']);
+  return $output;
+}
+

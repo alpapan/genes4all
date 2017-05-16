@@ -1,0 +1,594 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Exploration Module for InsectaCentral
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/**
+ * DONE when checking blasts, get each feature only once -> verify this happens
+ * DONE chado: create a keyword featurelist for BLASTs.
+ * DONE /done/add checkboxes on table/ and /done/a form to do/ a variety of things (mostly downloading)
+ * TODO Other kinds of drupal db data storage such as URLs.
+ * TODO TODO TODO : force species search to always limit by organisms actually shown? specially the library data
+ * NOTDO consider batch API http://www.imedstudios.com/labs/node/23 for fetching results. Probably NOT
+ * TODO but not me: use AHAH for forms (ajax-like) http://drupalsn.com/learn-drupal/drupal-tutorials/getting-going-ahah-and-drupal-6. Probably NOT
+ * TODO but not me: fix species dynatree -> inefficient implementation ? load it via javascript -> not FAPI integration; find FAPI method ? -> spend too much time...
+ *
+ */
+
+/**
+ * Implementation of hook_menu
+ */
+function genes4all_explore_menu() {
+  $include_path = drupal_get_path('module','genes4all').'/modules/genes4all_explore/includes/';
+  $items = array();
+    $items['admin/settings/genes4all_explore'] = array(
+  	'file path' => $include_path,
+    'file' => 'genes4all_explore_admin.inc',
+    'title' => 'Genes4all Exploration module settings',
+    'page callback' => 'genes4all_explore_admin_page',
+    'access arguments' => array('Administrate genes4all_explore'),
+    'description' => 'Configure the genes4all_explore module',
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['genes4all/explore'] = array(
+    'title' => 'Explore InsectaCentral',
+    'page callback' => 'genes4all_explore_page_main',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Search InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/search/phylogeny'] = array(
+  	'file path' => $include_path,
+    'file' => 'genes4all_explore_phylosearch.inc',
+    'title' => 'Explore InsectaCentral',
+    'page callback' => 'genes4all_explore_page_phylosearch',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Search InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/search/external'] = array(
+    'title' => 'External Search',
+    'page callback' => 'genes4all_explore_page_external_similarity',
+    'access arguments' => array('Access genes4all_explore'),
+    'page arguments' => array(3),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/info/feature'] = array(
+  	'file path' => $include_path,
+    'file' => 'genes4all_explore_lookup.inc',
+    'title' => 'Feature information',
+    'page arguments' => array(3),
+    'page callback' => 'genes4all_explore_page_feature_info',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Feature information',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/info/library'] = array(
+  	'file path' => $include_path,
+    'file' => 'genes4all_explore_lookup.inc',
+    'title' => 'Library information',
+    'page callback' => 'genes4all_explore_page_library_info',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Library information',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/info/showmore'] = array(
+  	'file path' => $include_path,
+    'file' => 'genes4all_explore_lookup.inc',
+    'title' => 'More information',
+    'page callback' => 'genes4all_explore_page_moreinfo',
+    'access arguments' => array('Access genes4all_explore'),
+    'page arguments' => array(3),
+    'description' => 'More information',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/noresults'] = array(
+    'title' => 'No results for your search',
+    'page callback' => 'genes4all_explore_noresults',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'No results for your search',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/fetch'] = array(
+    'title' => 'Search InsectaCentral',
+    'page callback' => 'genes4all_explore_fetch',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Fetch InsectaCentral content',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/sequences'] = array(
+    'title' => 'Sequence results',
+    'page callback' => 'genes4all_explore_results_present',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Results of your search',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/search/similarity'] = array(
+    'file' => 'biosoftware_bench.module',
+    'file path' => drupal_get_path('module', 'biosoftware_bench'),
+    'title' => 'BLAST/similarity servers',
+    'page callback' => 'biosoftware_bench_software_select_page',
+    'access arguments' => array('Access genes4all_explore'),
+    'description' => 'Similarity searches',
+    'type' => MENU_CALLBACK,
+    'weight' => 0,
+  );
+  $items['genes4all/search/accession'] = array(
+    'title' => 'Accession',
+    'page callback' => 'genes4all_explore_page_accession',
+    'access arguments' => array('Access genes4all_explore'),
+    'page arguments' => array(3),
+    'description' => 'Search with an accession ID',
+    'type' => MENU_CALLBACK,
+    'weight' => 1,
+  );
+  $items['genes4all/info/feature-ajax/assembly'] = array(
+    'title' => 'Feature AJAX assembly',
+    'page arguments' => array(4),
+    'page callback' => 'genes4all_explore_page_feature_info_assembly',
+    'access arguments' => array('Access genes4all_explore'),
+    'file' => 'genes4all_explore_lookup.inc',
+    'file path' => $include_path,
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/info/feature-ajax/annotation'] = array(
+    'title' => 'Feature AJAX annotation',
+    'page arguments' => array(4),
+    'page callback' => 'genes4all_explore_page_feature_info_annotation',
+    'access arguments' => array('Access genes4all_explore'),
+    'file' => 'genes4all_explore_lookup.inc',
+    'file path' => $include_path,
+    'type' => MENU_CALLBACK,
+  );
+    $items['genes4all/info/feature-ajax/plots'] = array(
+    'title' => 'Feature AJAX plots',
+    'page arguments' => array(4),
+    'page callback' => 'genes4all_explore_page_feature_info_plots',
+    'access arguments' => array('Access genes4all_explore'),
+    'file' => 'genes4all_explore_lookup.inc',
+    'file path' => $include_path,
+    'type' => MENU_CALLBACK,
+  );
+    $items['genes4all/info/feature-ajax/sequence'] = array(
+    'title' => 'Feature AJAX sequence',
+    'page arguments' => array(4),
+    'page callback' => 'genes4all_explore_page_feature_info_sequence',
+    'access arguments' => array('Access genes4all_explore'),
+    'file' => 'genes4all_explore_lookup.inc',
+    'file path' => $include_path,
+    'type' => MENU_CALLBACK,
+  );
+
+  if (file_exists($include_path .'/genes4all_explore_lookup.inc')) {
+    require_once($include_path .'/genes4all_explore_lookup.inc');
+    $new_items = genes4all_explore_lookup_menu();
+    $items = array_merge((array)$items, (array)$new_items);
+  }
+
+  return ($items);
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function genes4all_explore_perm() {
+  return array('Access genes4all_explore','Administrate genes4all_explore');
+}
+
+function genes4all_explore_page_main() {
+  $link_data = gmod_dbsf_get_add_var('genes4all_explore_external_search_link');
+  $return    = "<p>There are a number of methods to explore the data content of InsectaCentral. Please choose one:</p><ul>";
+  $return .= "<li/>". l("Phylogeny search", 'genes4all/search/phylogeny');
+  $return .= "<li/>". l("Similarity search (e.g. BLAST)", 'genes4all/search/similarity');
+  $return .= "<li/>". l("Get by accession", 'genes4all/search/accession');
+  if (!empty($link_data)) {
+    $link_name = gmod_dbsf_get_add_var('genes4all_explore_external_search_name');
+    $return .= "<li/>". l($link_name . t(' (external data)'), 'genes4all/search/external/'. $link_name);
+  }
+  if (module_exists('genes4all_download')) {
+    $return .= "<li/>". l("Download contigs, proteins etc", 'genes4all/download/request');
+  }
+  return $return ."</ul>";
+}
+
+/**
+ * Page that user sees when there are no results
+ *
+ * @return string
+ */
+function genes4all_explore_noresults($link = NULL) {
+  if (empty($link)) {
+    return "<p>I'm sorry, but your search produced no results.</p><p>Try ". l('another search', 'genes4all/explore') .".";
+  }else {
+    return "<p>I'm sorry, but your search produced no results.</p><p>Try ". l('another search', 'genes4all/search/'. $link) .".";
+  }
+}
+
+/**
+ * TODO: reconstruct the following to use functions which generate differnet types of forms
+ * these fnctions should be able to be used by functions other than this.
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_results_present() {
+  $op = isset($_POST['op']) ? $_POST['op'] : NULL;
+  if (isset($op)) {
+    switch ($op) {
+      case 'Assembly GFF':
+        $features = $_POST['features'];
+        if (empty($features)) {
+          break;
+        }
+        //get GFF, redirect
+        return gmod_dbsf_db_execute('chado', 'gmod_dbsf_chado_assembly2gff', $features);
+      //TODO Ideally we want a BioPerl script to be used here in order to produce all the various formats, such as EMBL or images etc.
+      break;
+
+      case 'Feature FASTA':
+        $features = $_POST['features'];
+        if (empty($features)) {
+          break;
+        }
+        //get FASTA, redirect
+        $fasta_array = gmod_dbsf_db_execute('chado', 'gmod_dbsf_chado_get_fasta', $features);
+        if (!empty($fasta_array)) {
+          $output = '<pre>';
+          foreach ($fasta_array as $id => $sequence) {
+            $sequence_wrap = wordwrap($sequence, 80, '<br/>', TRUE);
+            $output .= "<p>>$id<br>$sequence_wrap</p>";
+          }
+          return ($output .'</pre>');
+        }
+        break;
+    }
+  }
+  return ('No data found');
+}
+
+/**
+ * Implementation of hook_init().
+ */
+function genes4all_explore_init() {
+  drupal_add_css(drupal_get_path('module', 'genes4all_explore') .'/genes4all.css', 'module');
+}
+
+/**
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_theme() {
+  $themes = array(
+    'genes4all_explore_result_form' => array(
+      'arguments' => array('form'),
+      'function' => 'genes4all_explore_theme_result_form',
+    ),
+  );
+  return ($themes);
+}
+
+/**
+ *
+ * @param $form
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_theme_result_form($form) {
+  $table_array = array();
+  $table_array['header'] = array();
+  if (!empty($form['data']['#value'])){
+   $table_array = $form['data']['#value'];
+  }
+  if (empty($table_array['data'])) {
+    return;
+  }
+  // Sortable sorttable actually does not work in our table because it has been converted to a form.
+  // this should be fixed by someone with javascript knowledge.
+  drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/gmod_dbsf_sorttable.js');
+
+  // our output
+  $output = '';
+  // prepare table data for checkboxes
+  $row_checked = array();
+  $checkall = theme('table_select_header_cell');
+  $table_array['header'][0] = array('data' => $table_array['header'][0], 'class' => $checkall['class'] .' sortable');
+  // replace first field with checkboxes
+
+  foreach ($table_array['data'] as $row => $value) {
+    $feature_name = $value[0]['data'];
+    $row_checked[] = array_merge(
+      array(
+        array('data' => drupal_render($form['features'][$feature_name])),
+      ), array_slice($value, 1)
+    );
+  }
+  $output .= '<p>';
+
+  if (!empty($table_array['#links']['previous'])) {
+    $output .= $table_array['#links']['previous'];
+  }
+  if (!empty($table_array['#links']['next'])) {
+    $output .= $table_array['#links']['next'];
+  }
+  if (!empty($table_array['#links']['bookmark'])) {
+    $output .= $table_array['#links']['bookmark'];
+  }
+  $output .= '</p>';
+
+  $themed_table = theme_table($table_array['header'], $row_checked, $table_array['attributes'], $table_array['caption']);
+  $output .= $themed_table;
+  //TODO this may no longer work with drupal 6. must delete all non-# form items and render the entire form array
+  $output .= drupal_render($form['buttons']);
+  return ($output);
+}
+
+/**
+ * Display search results in a hook_form
+ *
+ * We do not have a form_submit hook for this function
+ * it is handled by url('genes4all/sequences')
+ *
+ * @param $form_state
+ * @param $table_array
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_result_form($form_state, $table_array) {
+  //exit if nothing is passed.
+  if (empty($table_array['data'])) {
+    return;
+  }
+  $row_check_data = array();
+  foreach ($table_array['data'] as $row => $value_array) {
+    //first element of value array is feature-name. it is also an array and we want the data part
+    $feature_name = $value_array[0]['data'];
+    $feature_info_link = l($feature_name, 'genes4all/info/feature',
+      array(
+        'attributes' => array(
+          'target' => '_blank',
+          'title' => "Details about $feature_name",
+        ),
+        'query' => array('feature_id' => $feature_name),
+      )
+    );
+    $row_check_data[$feature_name] = $feature_info_link;
+  }
+  $form             = array();
+  $form['data']     = array('#value' => $table_array);
+  $form['features'] = array(
+    '#type' => 'checkboxes',
+    '#options' => $row_check_data,
+  );
+  $form['buttons'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Get features'),
+    '#description'=>module_exists('genes4all_download') ? t('Download selected features. If you wish to download entire datasets, then you may want to see the '.l('download','genes4all/download/request').' module.') : t('Download selected features.'),
+    '#collapsible' => FALSE,
+    '#weight' => 20,
+    'FASTA' => array(
+      'union' => array(
+        '#type' => 'submit',
+        '#value' => t('Feature FASTA'),
+        '#weight' => 15,
+      ),
+      'GFF' => array(
+        '#type' => 'submit',
+        '#value' => t('Assembly GFF'),
+        '#weight' => 16,
+      ),
+    ),
+  );
+  // We do not have a form_submit hook for this function
+  $form['#action'] = url('genes4all/sequences');
+  return ($form);
+}
+
+/**
+ * if a valid URL is passed to $_GET['ic_url'], it will redirect there.
+ * TODO validation this is correct InsectaCentral URL?
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_fetch() {
+  $ic_url = $_GET['ic_url'];
+  if (!$ic_url) {
+    $ic_url = $_POST['ic_url'];
+  }
+  if ($ic_url) {
+    $ic_url = check_plain($ic_url);
+    if (valid_url($url, TRUE)) {
+      drupal_goto($url);
+    }
+  }
+}
+
+/**
+ * Implementation of hook_form
+ * This creates the accession form
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_accession_search_form($form_state) {
+  $form = array();
+  $form['accession'] = array(
+    '#weight' => '0',
+    '#description' => t('Please provide a valid accession ID. The ID built using IC + NCBI TaxID + Assembly version where Aa is first Ab is second etc + Data type such Econ for Expressed contig + serial ID.'),
+    '#required' => '1',
+    '#size' => '20',
+    '#type' => 'textfield',
+    '#title' => 'Accession',
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Search'),
+  );
+  return $form;
+}
+
+/**
+ *
+ * @param $form
+ * @param $form_state
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_accession_search_form_validate($form, &$form_state) {
+  $accession = gmod_dbsf_validate_ic_id($form_state['values']['accession']);
+  if ($accession == FALSE) {
+    form_set_error('accession', t('Not a valid InsectaCentral accession.'));
+    unset($form_state['values']);
+    unset($form_state['storage']);
+    $form_state['rebuild'] = TRUE;
+  }
+  else {
+    $form_state['values']['accession'] = $accession;
+  }
+}
+
+/**
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_page_accession($accession = NULL) {
+  //this page @ genes4all/search/accession allows to grab the value accession via GET, POST or otherwise present a form.
+  // e.g. genes4all/search/accession?accession=IC104503AcEcon1
+  if (empty($accession) && !empty($_GET['accession'])) {
+    $accession = $_GET['accession'];
+  }
+  elseif (empty($accession) && !empty($_POST['accession'])) {
+    $accession = $_POST['accession'];
+  }
+  // I cannot remember why i wrote the following. Probably to grab a page?
+  //if ( arg(0) == 'node' && is_numeric(arg(1)) && ! arg(2) ) {
+  // $node = node_load(arg(1));
+  // $nid= $node->nid;
+  //}
+  if ($accession) {
+    if (is_numeric($accession)) {
+      drupal_goto('http://www.ncbi.nlm.nih.gov/sites/gquery', "term=$accession");
+    }
+    $accession = trim(check_plain($accession));
+    //$accession = gmod_dbsf_validate_ic_id($accession);
+    if (empty($accession)) {
+      drupal_set_message(t('Not a valid InsectaCentral accession.'), 'error', FALSE);
+      return drupal_get_form('genes4all_explore_accession_search_form');
+    }
+    else {
+      drupal_goto('/genes4all/info/feature', "feature_id=$accession");
+    }
+    //  $url=url('/genes4all/info/feature',array('query' => array('feature_id' => $accession),'alias'=>TRUE));
+    // break up the accession so we can retrieve the various bits of info that will make the URL.
+    //preg_match("/^[A-Z]{2}(\d+)[A-Z][a-z]([A-Z][a-z]+)(\d+)/",$accession,$matches);
+    //$species= $matches[1];
+    //$data_type= $matches[2];
+    //if ($data_type=='Econ'){$data_object="_caf";}
+    //elseif ($data_type=='Aorf'){$data_object="_orf";}
+    //elseif ($data_type=='Apep'){$data_object="_prot";}
+    //$serial= $matches[3];
+    //if ($species && $data_object && $serial){
+    //   $gbrowse_url = gmod_dbsf_get_add_var('genes4all_explore_gbrowse_link');
+    // $url= $gbrowse_url.$species.$data_object.'/?name='.$accession;
+    // if (valid_url($url,TRUE)){drupal_goto($path= $url);}
+    //}
+    //else {
+    // $error_msg="Your accession ID does not look correct...";
+    // drupal_set_message($error_msg, 'error', TRUE);
+    // return drupal_get_form('genes4all_explore_accession_search_form');
+    //}
+  }
+  else {
+    return drupal_get_form('genes4all_explore_accession_search_form');
+  }
+}
+
+function genes4all_explore_page_external_similarity($link = NULL) {
+  $sorry = t('No external link has been specified by the administrator.');
+  if (empty($link)) {
+    return $sorry;
+  }
+  $link_data = gmod_dbsf_get_add_var('genes4all_explore_external_search_link');
+  if ($link_data) {
+    return "<p>Showing external link: $link from $link_data</p>" . '<iframe src="'. $link_data .'" width="100%" frameborder="0" marginwidth="0px" marginheight="0px" scrolling="auto" height="800px">Your Browser does not support iframes.</iframe>';
+  }
+  else {
+    return $sorry;
+  }
+}
+
+/**
+ * Determine if an id is an IC accession or a internal chado id
+ * then return both name and ID
+ *
+ * @param $id
+ *
+ * @return unknown_type
+ */
+function genes4all_explore_determine_feature_accession($id) {
+  if (empty($id)) {
+    return;
+  }
+  $feature_id       = '';
+  $feature_name     = '';
+  $feature_info_sql = '';
+  if (is_numeric($id)) {
+    $feature_id = $id;
+    $feature_info_sql = 'SELECT feature.uniquename,feature.feature_id,cvterm.name as type_name,organism_id' . ' from feature JOIN cvterm ON feature.type_id=cvterm.cvterm_id where feature_id='. $feature_id;
+  }
+  else {
+    $feature_name = $id;
+    $feature_info_sql = 'SELECT feature.feature_id,feature.uniquename,cvterm.name as type_name,organism_id'. " from feature JOIN cvterm ON feature.type_id=cvterm.cvterm_id where feature.uniquename='$feature_name'";
+  }
+  $db_feature_data = db_fetch_array(db_query($feature_info_sql));
+  $feature_id      = $db_feature_data['feature_id'];
+  $feature_name    = $db_feature_data['uniquename'];
+  $feature_type    = $db_feature_data['type_name'];
+  $feature_org_id  = $db_feature_data['organism_id'];
+
+  //return empty if we failed to find it.
+  if (empty($feature_id) || empty($feature_name)) {
+    return;
+  }
+  else {
+    return array('id' => $feature_id, 'name' => $feature_name, 'type' => $feature_type, 'organism' => $feature_org_id);
+  }
+}
+
+
+
+/* Unused function or under development
+
+/* Inactive/undeveloped functions
+
+ * Get SNP data for a feature
+ * @param $feature_id
+ *
+ * @return unknown_type
+
+function genes4all_explore_get_feature_snp_data($feature_id) {
+  if (empty($feature_id)) {
+    return;
+  }
+  $snp_data = array();
+  //TODO: write proper SQL statements.
+  $snp_feature_sql = 'SELECT feature_id from featureloc where '
+  . " srcfeature_id=%d  AND type_id="
+  . "(SELECT cvterm where name='SNP' and cv_id=(SELECT cv_id from cv where name='sequence'))";
+  $snp_result = db_query($snp_feature_sql,$feature_id);
+  while ($dbdata = db_fetch_array($snp_result)) {
+    $snp_data_sql = "SELECT something from feature_dbxref/cvterm/prop to get the"
+    . "transition/transversion, coding, codon position etc ";
+    $snp_data_result = db_query($snp_data_sql);
+    $db_snp_data = db_fetch_array($snp_data_result);
+    $snp_data[$dbdata['feature_id']] = $db_snp_data;
+  }
+  return ($snp_data);
+}
+
+
+
+*/
+

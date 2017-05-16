@@ -1,0 +1,14 @@
+;$Id$
+name = "GMOD DBSF Chado API"
+description = "GMOD DBSF Chado shared functions"
+core = 6.x
+php = 5.1
+package = gmod_dbsf
+dependencies[] = gmod_dbsf
+
+; Information added by drupal.org packaging script on 2012-05-31
+version = "6.x-2.2"
+core = "6.x"
+project = "gmod_dbsf"
+datestamp = "1338445560"
+

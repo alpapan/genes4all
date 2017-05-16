@@ -1,0 +1,774 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * TODO: consider creating arrays for form building (e.g. $purification_method_array) via the database.
+ * Module for adding experiments into InsectaCentral
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ *
+ * All SQLs here are aimed for Drupal, not Chado
+ */
+
+/**
+ * Implementation of hook_menu
+ */
+function genes4all_experiment_menu() {
+  $includes_path = drupal_get_path('module', 'genes4all') .'/includes';
+  $items = array();
+  $items['genes4all/experiment/added'] = array(
+    'file' => 'includes/genes4all_experiment_add.inc',
+    'title' => 'Completed experiment submission',
+    'page callback' => 'genes4all_experiment_page_added',
+    'access arguments' => array('Add new experiments'),
+    'description' => 'Experiments in InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/add'] = array(
+    'file' => 'includes/genes4all_experiment_add.inc',
+    'title' => 'Add a new experiment',
+    'page callback' => 'genes4all_experiment_page_add',
+    'access arguments' => array('Add new experiments'),
+    'description' => 'Experiments in InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );$items['genes4all/experiment/search'] = array(
+    'file' => 'includes/genes4all_experiment_search.inc',
+    'title' => 'Add a new experiment',
+    'page callback' => 'genes4all_experiment_page_search',
+    'access arguments' => array('View experiments'),
+    'description' => 'Experiments in InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/view'] = array(
+    'file' => 'includes/genes4all_experiment_view.inc',
+    'title' => 'View experiments',
+    'page arguments' => array(3),
+    'page callback' => 'genes4all_experiment_page_view_experiment',
+    'access arguments' => array('View experiments'),
+    'description' => 'Experiments in InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/ueberview'] = array(
+    'file' => 'includes/genes4all_experiment_view.inc',
+    'title' => 'View experiments',
+    'page callback' => 'genes4all_experiment_page_view_experiment_all',
+    'access arguments' => array('View all experiments'),
+    'description' => 'Experiments in InsectaCentral',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/pub/autocomplete'] = array(
+    'file' => 'genes4all_autocomplete.inc',
+    'file path' => $includes_path,
+    'title' => 'Publication autocomplete',
+    'page callback' => 'genes4all_experiment_publication_autocomplete',
+    'access arguments' => array('View experiments'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/target/autocomplete'] = array(
+    'file' => 'genes4all_autocomplete.inc',
+    'file path' => $includes_path,
+    'title' => 'TargetDB autocomplete',
+    'page callback' => 'genes4all_experiment_targetdb_autocomplete',
+    'access arguments' => array('View experiments'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/construct/autocomplete'] = array(
+    'file' => 'genes4all_autocomplete.inc',
+    'file path' => $includes_path,
+    'title' => 'ConstructDB autocomplete',
+    'page callback' => 'genes4all_experiment_constructdb_autocomplete',
+    'access arguments' => array('View experiments'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/resource/autocomplete'] = array(
+    'file' => 'genes4all_autocomplete.inc',
+    'file path' => $includes_path,
+    'title' => 'resourceDB autocomplete',
+    'page callback' => 'genes4all_experiment_resourcedb_autocomplete',
+    'access arguments' => array('View experiments'),
+    'type' => MENU_CALLBACK,
+    'page arguments' => array(4),
+  );
+  $items['genes4all/experiment/study/autocomplete'] = array(
+    'file' => 'genes4all_autocomplete.inc',
+    'file path' => $includes_path,
+    'title' => 'studyDB autocomplete',
+    'page callback' => 'genes4all_experiment_studydb_autocomplete',
+    'access arguments' => array('View experiments'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/experiment/dbname/autocomplete'] = array(
+    'file' => 'genes4all_autocomplete.inc',
+    'file path' => $includes_path,
+    'title' => 'DB name autocomplete',
+    'page callback' => 'genes4all_experiment_dbname_autocomplete',
+    'access arguments' => array('View experiments'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_init()
+ */
+function genes4all_experiment_init() {
+  $css_file = drupal_get_path('module', 'genes4all') .'/genes4all.css';
+  if (file_exists($css_file)) {
+    drupal_add_css($css_file, 'module');
+  }
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function genes4all_experiment_perm() {
+  return array('Add new experiments', 'View experiments', 'View all experiments');
+}
+
+function genes4all_experiment_tabulate_study_data($data_id, $data_type, $override = FALSE) {
+  $passkey = $_SESSION['passkey'];
+  if ((empty($passkey) && empty($override)) || empty($data_id) || empty($data_type)) {
+    return FALSE;
+  }
+  switch ($data_type) {
+    case 'pub_id':
+      $study_id     = check_plain($_SESSION['study_id']);
+      $table_data   = array();
+      $data         = genes4all_experiment_get_authorships($data_id);
+      $select_sql   = 'SELECT uniquename,passkey,dbxref.accession as dbxref,db.name as dbname from {gmod_dbsf_pub} as pub ' . ' join {gmod_dbsf_dbxref} as dbxref ON dbxref.dbxref_id=pub.dbxref_id JOIN {gmod_dbsf_db} as db ON db.db_id=dbxref.db_id' . " where pub_id=%d";
+      $abstract_sql = "SELECT description from {gmod_dbsf_study} WHERE study_id=%d";
+      $res          = db_fetch_array(db_query($select_sql, $data_id));
+      if (!empty($study_id)) {
+        $description = db_fetch_array(db_query($abstract_sql, $study_id));
+        $description = $description['description'];
+      }
+      //security
+      if ($res['passkey'] != $passkey && empty($override)) {
+        return FALSE;
+      }
+      $table_data[] = array('Name', $res['uniquename']);
+      if ($res['dbname'] != 'local publication') {
+        $table_data[] = array(t('Database'), $res['dbxref']);
+        $table_data[] = array(t('Database name'), $res['dbname']);
+      }
+      foreach ($data as $order => $value_array) {
+        $table_data[] = array(t("Communicating author's last name"), $value_array['last']);
+        $table_data[] = array(t("Communicating author's first name"), $value_array['first']);
+        $table_data[] = array(t("Communicating author's email address"), $value_array['email']);
+      }
+      if (!empty($description)) {
+        $table_data[] = array("Abstract/Study description", $description);
+      }
+      $table_attributes = array('class' => 'genes4all-highpadded-table');
+      $table_header     = array('Variable', 'Value');
+      $table_caption    = "<h3>Publication data</h3>";
+      if (empty($table_data)) {
+        return;
+      }
+      $themed_table = theme_table($table_header, $table_data, $table_attributes, $table_caption);
+      return $themed_table;
+
+    case 'all':
+      $table_pub       = genes4all_experiment_tabulate_study_data($_SESSION['pub_id'], 'pub_id');
+      $table_target    = genes4all_experiment_tabulate_study_data($_SESSION['target_id'], 'target_id');
+      $table_construct = genes4all_experiment_tabulate_study_data($_SESSION['construct_id'], 'construct_id');
+      $table_animal    = genes4all_experiment_tabulate_study_data($_SESSION['animals_id'], 'animals_id');
+      $table_delivery  = genes4all_experiment_tabulate_study_data($_SESSION['delivery_id'], 'delivery_id');
+      $table_assay     = genes4all_experiment_tabulate_study_data($_SESSION['assay_id'], 'assay_id');
+
+      $themed_table = $table_pub . $table_target . $table_construct . $table_animal . $table_delivery . $table_assay;
+      return $themed_table;
+
+    case 'study_id':
+      $sql = "SELECT uniquename,description,cvterm.name as type_name from {gmod_dbsf_study} study JOIN {gmod_dbsf_cvterm} cvterm on cvterm.cvterm_id=study.type_id where study_id=%d";
+      $res = db_fetch_array(db_query($sql, $data_id));
+      if (empty($res['uniquename'])) {
+        return;
+      }
+      $text = '<hr>'. l("<h1>Study ". $res['uniquename'] .'</h1>', 'genes4all/experiment/view/'. $data_id,
+        array(
+          'alias' => TRUE,
+          'html' => TRUE,
+          'attributes' => array('target' => '_blank'),
+        )
+      );
+      $text .= '<p>';
+      if (!empty($res['type_name'])) {
+        $text .= 'Is an '. $res['type_name'] .' study.</p>';
+      }
+      if (!empty($res['description'])) {
+        $text .= '<h4>Description</h4>'. $res['description'];
+      }
+      $text .= '</p>';
+      return $text;
+
+    case 'target_id':
+      $table_data       = array();
+      $table_attributes = array('class' => 'genes4all-highpadded-table');
+      $table_header     = array('Variable', 'Value');
+      $table_caption    = "<h3>Target gene data</h3>";
+      $data             = genes4all_experiment_feature_get($data_id, NULL, $override);
+      $table_data[]     = array('Name', $data['general']['uname']);
+      if (!empty($data['general']['sequence'])) {
+        $table_data[] = array('sequence', wordwrap($data['general']['sequence'], 80, '<br>', TRUE));
+      }
+      $table_data[] = array('Taxonomy class', $data['general']['tax_class']);
+      $table_data[] = array('Taxonomy order', $data['general']['tax_order']);
+      $table_data[] = array('Taxonomy family', $data['general']['tax_family']);
+      $table_data[] = array('Taxonomy genus', '<i>'. $data['general']['genus'] .'</i>');
+      $table_data[] = array('Taxonomy species', '<i>'. $data['general']['species'] .'</i>');
+      if (!empty($data['general']['ncbi_taxid'])) {
+        $table_data[] = array('NCBI taxonomy ID', '<i>'. $data['general']['ncbi_taxid'] .'</i>');
+      }
+      if (!empty($data['cvterm']['aln_region'])) {
+        $aln_region = implode(', ', $data['cvterm']['aln_region']);
+        $table_data[] = array('Alignment to RNAi construct', $aln_region);
+      }
+
+      $table_data[] = array('Repository', $data['general']['db_name']);
+      $table_data[] = array('ID in repository', $data['general']['accession']);
+      if (empty($table_data)) {
+        return;
+      }
+      $themed_table = theme_table($table_header, $table_data, $table_attributes, $table_caption);
+      return $themed_table;
+
+    case 'construct_id':
+      $table_data       = array();
+      $table_attributes = array('class' => 'genes4all-highpadded-table');
+      $table_header     = array('Variable', 'Value');
+      $table_caption    = "<h3>RNAi construct data</h3>";
+      $data             = genes4all_experiment_feature_get($data_id, NULL, $override);
+      $table_data[]     = array('Name', $data['general']['uname']);
+      if (!empty($data['general']['sequence'])) {
+        $table_data[] = array('sequence', wordwrap($data['general']['sequence'], 80, '<br>', TRUE));
+      }
+      if (!empty($data['prop']['construct_protocol_details'])) {
+        $protocol = implode(', ', $data['prop']['construct_protocol_details']);
+      }
+      if (!empty($data['prop']['construct_protocol_kit'])) {
+        $kit = implode(', ', $data['prop']['construct_protocol_kit']);
+      }
+
+      if (!empty($data['cvterm']['rna_probe_type'])) {
+        $rna_probe_type = implode(', ', $data['cvterm']['rna_probe_type']);
+        $table_data[] = array('Probe type', $rna_probe_type);
+      }
+
+      if (!empty($data['cvterm']['purification'])) {
+        $purification = implode(', ', $data['cvterm']['purification']);
+        $table_data[] = array('Purification method', $purification);
+      }
+
+      if (!empty($data['cvterm']['annealing_method'])) {
+        $annealing_method = implode(', ', $data['cvterm']['annealing_method']);
+        $table_data[] = array('Annealing method', $annealing_method);
+      }
+
+      if (!empty($protocol)) {
+        $table_data[] = array('Protocol details', $protocol);
+      }
+      if (!empty($kit)) {
+        $table_data[] = array('If prepared in-vitro, name of kit used', $kit);
+      }
+
+      $table_data[] = array('Repository', $data['general']['db_name']);
+      $table_data[] = array('ID in repository', $data['general']['accession']);
+      if (empty($table_data)) {
+        return;
+      }
+      $themed_table = theme_table($table_header, $table_data, $table_attributes, $table_caption);
+      return $themed_table;
+
+    case 'animals_id':
+      $table_data       = array();
+      $table_attributes = array('class' => 'genes4all-highpadded-table');
+      $table_header     = array('Variable', 'Value');
+      $table_caption    = "<h3>Experimental animal set</h3>";
+      $data             = genes4all_experiment_resource_get($data_id, NULL, $override);
+      $table_data[]     = array('Name', $data['general']['uname']);
+      if (!empty($data['general']['sequence'])) {
+        $table_data[] = array('sequence', wordwrap($data['general']['sequence'], 80, '<br>', TRUE));
+      }
+      $table_data[] = array('Taxonomy class', $data['general']['tax_class']);
+      $table_data[] = array('Taxonomy order', $data['general']['tax_order']);
+      $table_data[] = array('Taxonomy family', $data['general']['tax_family']);
+      $table_data[] = array('Taxonomy genus', '<i>'. $data['general']['genus'] .'</i>');
+      $table_data[] = array('Taxonomy species', '<i>'. $data['general']['species'] .'</i>');
+      if (!empty($data['general']['ncbi_taxid'])) {
+        $table_data[] = array('NCBI taxonomy ID', '<i>'. $data['general']['ncbi_taxid'] .'</i>');
+      }
+      if (!empty($data['cvterm']['dev_stage'])) {
+        $dev_stage = implode(', ', $data['cvterm']['dev_stage']);
+        $table_data[] = array('Developmental stage', $dev_stage);
+      }
+      if (!empty($data['cvterm']['origin'])) {
+        $origin = implode(', ', $data['cvterm']['origin']);
+        $table_data[] = array('Animal origin', $origin);
+      }
+
+      if (!empty($data['cvterm']['colony_infection'])) {
+        $colony_infection = implode(', ', $data['cvterm']['colony_infection']);
+        $table_data[] = array('Colony infection', $colony_infection);
+      }
+
+      if (!empty($data['cvterm']['indiv_infection'])) {
+        $indiv_infection = implode(', ', $data['cvterm']['indiv_infection']);
+        $table_data[] = array('Individual insect infection', $indiv_infection);
+      }
+      $table_data[] = array('Stock center', $data['general']['db_name']);
+      $table_data[] = array('ID in repository', $data['general']['accession']);
+      if (empty($table_data)) {
+        return;
+      }
+      $themed_table = theme_table($table_header, $table_data, $table_attributes, $table_caption);
+      return $themed_table;
+
+    case 'delivery_id':
+      $table_data       = array();
+      $table_attributes = array('class' => 'genes4all-highpadded-table');
+      $table_header     = array('Variable', 'Value');
+      $table_caption    = "<h3>Delivery protocol</h3>";
+      $data             = genes4all_experiment_resource_get($data_id, NULL, $override);
+      $table_data[]     = array('Name', $data['general']['uname']);
+      if (!empty($data['cvterm']['delivery_method'])) {
+        $delivery_method = implode(', ', $data['cvterm']['delivery_method']);
+      }
+      if (!empty($data['cvterm']['control_method'])) {
+        $control_method = implode(', ', $data['cvterm']['control_method']);
+      }
+      if (!empty($data['prop']['adjuvant_amount'])) {
+        $adj_amnt = implode(', ', $data['prop']['adjuvant_amount']);
+      }
+      if (!empty($data['prop']['construct_concentration'])) {
+        $construct_concentration = implode(', ', $data['prop']['construct_concentration']);
+      }
+      if (!empty($data['prop']['replicates'])) {
+        $replicates = implode(', ', $data['prop']['replicates']);
+      }
+      if (!empty($data['prop']['adjuvant_name'])) {
+        $adjuvant_name = implode(', ', $data['prop']['adjuvant_name']);
+      }
+      if (!empty($data['prop']['delivery_buffer'])) {
+        $delivery_buffer = implode(', ', $data['prop']['delivery_buffer']);
+      }
+      if (!empty($data['prop']['control_method_detail'])) {
+        $control_method_detail = implode(', ', $data['prop']['control_method_detail']);
+      }
+      if (!empty($data['prop']['delivery_detail'])) {
+        $delivery_detail = implode(', ', $data['prop']['delivery_detail']);
+      }
+      if (!empty($data['prop']['delivery_organ'])) {
+        $delivery_organ = implode(', ', $data['prop']['delivery_organ']);
+      }
+
+      if (!empty($construct_concentration)) {
+        $table_data[] = array('Construct concentration used', $construct_concentration);
+      }
+      if (!empty($delivery_method)) {
+        $table_data[] = array('Delivery method', $delivery_method);
+      }
+      if (!empty($delivery_organ)) {
+        $table_data[] = array('Delivery tissue/organ', $delivery_organ);
+      }
+      if (!empty($delivery_buffer)) {
+        $table_data[] = array('Delivery buffer', $delivery_buffer);
+      }
+      if (!empty($adj_amnt)) {
+        $table_data[] = array('Adjuvant amount', $adj_amnt);
+      }
+      if (!empty($replicates)) {
+        $table_data[] = array('Number of replicates', $replicates);
+      }
+      if (!empty($adjuvant_name)) {
+        $table_data[] = array('Adjuvant name', $adjuvant_name);
+      }
+      if (!empty($control_method)) {
+        $table_data[] = array('Control method', $control_method);
+      }
+      if (!empty($control_method_detail)) {
+        $table_data[] = array('Control protocol', $control_method_detail);
+      }
+      if (!empty($delivery_detail)) {
+        $table_data[] = array('Delivery protocol', $delivery_detail);
+      }
+      if (empty($table_data)) {
+        return;
+      }
+      $themed_table = theme_table($table_header, $table_data, $table_attributes, $table_caption);
+      return $themed_table;
+
+    case 'assay_id':
+      $table_data       = array();
+      $table_attributes = array('class' => 'genes4all-highpadded-table');
+      $table_header     = array('Variable', 'Value');
+      $table_caption    = "<h3>Assay data</h3>";
+      $data             = genes4all_experiment_resource_get($data_id, NULL, $override);
+      $table_data[]     = array('Name', $data['general']['uname']);
+      if (!empty($data['cvterm']['dev_stage'])) {
+        $dev_stage = implode(', ', $data['cvterm']['dev_stage']);
+      }
+      if (!empty($data['cvterm']['detection_method'])) {
+        $detection_method = implode(', ', $data['cvterm']['detection_method']);
+      }
+      if (!empty($data['cvterm']['detect_dsrna_processing'])) {
+        $detect_dsrna_processing = implode(', ', $data['cvterm']['detect_dsrna_processing']);
+      }
+      if (!empty($data['prop']['detect_time'])) {
+        $detect_time = implode(', ', $data['prop']['detect_time']);
+      }
+      if (!empty($data['cvterm']['silencing_level'])) {
+        $silencing_level = implode(', ', $data['cvterm']['silencing_level']);
+      }
+      if (!empty($data['prop']['silencing_accurate_level'])) {
+        $silencing_accurate_level = implode(', ', $data['prop']['silencing_accurate_level']);
+      }
+      if (!empty($data['prop']['assay_organ'])) {
+        $assay_organ = implode(', ', $data['prop']['assay_organ']);
+      }
+
+      if (!empty($dev_stage)) {
+        $table_data[] = array('Developmental stage at detection', $dev_stage);
+      }
+      if (!empty($detection_method)) {
+        $table_data[] = array('Detection method', $detection_method);
+      }
+      if (!empty($assay_organ)) {
+        $table_data[] = array('Tissue/organ used in detection assay', $assay_organ);
+      }
+      if (!empty($detect_dsrna_processing)) {
+        $table_data[] = array('dsRNA processing detection', $detect_dsrna_processing);
+      }
+      if (!empty($detect_time)) {
+        $table_data[] = array('Detection time (h after assay)', $detect_time);
+      }
+      if (!empty($silencing_level)) {
+        $table_data[] = array('Average silencing level', $silencing_level);
+      }
+      if (!empty($silencing_accurate_level)) {
+        $table_data[] = array('Accurate silencing level (%)', $silencing_accurate_level);
+      }
+      if (empty($table_data)) {
+        return;
+      }
+      $themed_table = theme_table($table_header, $table_data, $table_attributes, $table_caption);
+      return $themed_table;
+  }
+}
+
+/**
+ * Allow for rewriting form names so that multiple forms can
+ * be generated in one page from same function
+ *
+ * @param $form_id
+ * @param $args
+ *
+ * @return unknown_type
+ */
+function genes4all_experiment_forms($form_id, $args = NULL) {
+
+  $forms = array();
+  if (strpos($form_id, 'genes4all_experiment_reset_session_form_') === 0) {
+    $forms[$form_id] = array(
+      'callback' => 'genes4all_experiment_reset_session_form',
+      'callback arguments' => $args,
+    );
+  }
+  return $forms;
+}
+
+/**
+ *
+ * Used to unset a session variable and hence reset a specific form
+ */
+function genes4all_experiment_reset_session_form($form_state, &$todestroy = NULL) {
+  if (!empty($todestroy)) {
+    $form = array(
+      'toreset' => array(
+        '#type' => 'value',
+        '#value' => $todestroy,
+      ),
+      'forget_'. $todestroy => array(
+        '#attributes' => array('title' => t('Remove choice of '. $todestroy)),
+        '#type' => 'submit',
+        '#value' => t('Reset this page'),
+        '#submit' => array('genes4all_experiment_reset_session_form_submit'),
+      ),
+    );
+
+
+    return $form;
+  }
+  else {
+    $form = array(
+      'toreset' => array(
+        '#type' => 'value',
+        '#value' => 'all',
+      ), 'buttons' => array(
+        '#title' => t('Start new submission'),
+        '#type' => 'fieldset',
+        'forget' => array(
+          '#attributes' => array('title' => t('Leave this sudy and start a new one')),
+          '#type' => 'submit',
+          '#value' => t('without deleting this one'),
+          '#submit' => array('genes4all_experiment_reset_session_form_submit'),
+        ), 'kill' => array(
+          '#attributes' => array('title' => t('Delete this and start a new study')),
+          '#type' => 'submit',
+          '#value' => t('and delete this one'),
+          '#submit' => array('genes4all_experiment_reset_session_form_submit'),
+        ),
+      ),
+    );
+    return $form;
+  }
+}
+
+function genes4all_experiment_reset_session_form_submit($form, &$form_state) {
+  //dpm($form);
+  //dpm($form_state);
+  $toreset    = $form_state['values']['toreset'];
+  $reset_sql  = "UPDATE {gmod_dbsf_study} as study set type_id=(SELECT cvterm_id from {gmod_dbsf_cvterm} as cvterm where name='unfinished') WHERE study_id=%d";
+  $delete_sql = "DELETE from {gmod_dbsf_study}  WHERE study_id=%d";
+  $study_id   = check_plain($_SESSION['study_id']);
+  if (empty($study_id)) {
+    drupal_set_message(t('A lethal error or hacking attempt has occured. Please contact he administrator.'), 'error');
+    return;
+  }
+  if (!empty($toreset) && $toreset != 'all') {
+    //we are resetting also the status of the study
+    db_query($reset_sql, $study_id);
+    gmod_dbsf_clear_session($toreset);
+  }
+  elseif ($form_state['values']['op'] == 'and delete this one') {
+    db_query($delete_sql, $study_id);
+    drupal_set_message(t('Study deleted.'), 'warning');
+    gmod_dbsf_clear_session(array('study_id', 'passkey', 'pub_id', 'animals_id', 'target_id', 'construct_id', 'delivery_id', 'assay_id',
+        'study_type', 'study_name', 'pub_name', 'animals_name', 'target_name', 'construct_name', 'delivery_name', 'assay_name',
+      ));
+  }
+  else {
+    gmod_dbsf_clear_session(array('study_id', 'passkey', 'pub_id', 'animals_id', 'target_id', 'construct_id', 'delivery_id', 'assay_id',
+        'study_type', 'study_name', 'pub_name', 'animals_name', 'target_name', 'construct_name', 'delivery_name', 'assay_name',
+      ));
+  }
+}
+
+function genes4all_experiment_passkey_check($study_name, $passkey) {
+  if (empty($passkey) || empty($study_name)) {
+    return FALSE;
+  }
+  $uname   = check_plain(trim($study_name));
+  $passkey = check_plain(trim($passkey));
+  $check   = "SELECT study_id,passkey from {gmod_dbsf_study} WHERE uniquename='$uname'";
+  $res     = db_fetch_array(db_query($check));
+  $id      = $res['study_id'];
+  $pass    = $res['passkey'];
+  if (empty($id)) {
+    return TRUE;
+  }
+  else {
+    if ($pass !== $passkey) {
+      return FALSE;
+    }
+    else {
+      return TRUE;
+    }
+  }
+}
+
+/** Unused
+ function genes4all_experiment_publication_verify($uname) {
+ $passkey    = check_plain($_SESSION['passkey']);
+ $uname      = check_plain(trim($uname));
+ $check_pass = "SELECT passkey from {gmod_dbsf_pub} WHERE uniquename='$uname'";
+ $res_pass   = db_fetch_array(db_query($check_pass));
+ if (!empty($res_pass['passkey']) && $res_pass['passkey'] !== $passkey) {
+ return FALSE;
+ }
+ else {
+ return TRUE;
+ }
+ }
+ */
+function genes4all_experiment_get_authorships($pub_id) {
+  if (empty($pub_id)) {
+    return FALSE;
+  }
+  $data   = array();
+  $sql    = 'SELECT first_names,last_names,email,address,rank from {gmod_dbsf_author} as author JOIN ' . ' {gmod_dbsf_pub_author} as pub_author ON pub_author.author_id=author.author_id'. " where pub_id=$pub_id";
+  $db_res = db_query($sql);
+  while ($res = db_fetch_array($db_res)) {
+    $data[$res['rank']] = array(
+      'first' => $res['first_names'],
+      'last' => $res['last_names'],
+      'email' => $res['email'],
+      'address' => $res['address'],
+    );
+  }
+  return $data;
+}
+
+function genes4all_experiment_feature_get($id = NULL, $type = NULL, $override = FALSE) {
+  $passkey    = check_plain($_SESSION['passkey']);
+  $feature_id = '';
+  $data       = array();
+
+  if (empty($passkey) && empty($override)) {
+    return FALSE;
+  }
+  if (empty($id)) {
+    $sql = 'SELECT feature_id,uniquename from {gmod_dbsf_feature} WHERE TRUE ';
+    if (empty($override)) {
+      $sql .= " AND passkey='$passkey'";
+    }
+    if (!empty($type)) {
+      $sql .= " AND type_id=(SELECT cvterm_id from {gmod_dbsf_cvterm} where name='$type')";
+    }
+    $res = db_query($sql);
+    while ($row = db_fetch_array($res)) {
+      if (!empty($row['feature_id'])) {
+        $data[$row['feature_id']] = $row['uniquename'];
+      }
+    }
+    return $data;
+  }
+
+  $sql = 'SELECT feature.uniquename,feature_id,feature.dbxref_id,dbxref.accession,db.name as db_name,' . ' residues,feature.organism_id,tax_class,tax_order,tax_family,' . 'genus,species,ncbi_taxid,cvterm.name as type_name from {gmod_dbsf_feature} as feature JOIN ' . ' {gmod_dbsf_dbxref} as dbxref ON dbxref.dbxref_id=feature.dbxref_id JOIN {gmod_dbsf_db} as db ON db.db_id=dbxref.db_id ' . ' JOIN {gmod_dbsf_organism} as organism ON organism.organism_id=feature.organism_id ' . ' JOIN {gmod_dbsf_cvterm} as cvterm ON cvterm.cvterm_id=feature.type_id';
+  if (is_numeric($id)) {
+    $sql .= " where feature_id=$id";
+  }
+  else {
+    $sql .= " where uniquename='$id'";
+  }
+  $res        = db_fetch_array(db_query($sql));
+  $uname      = $res['uniquename'];
+  $feature_id = $res['feature_id'];
+  if (!$feature_id) {
+    return 1;
+  }
+  else {
+    if (empty($override)) {
+      $pass_check    = "SELECT passkey from {{gmod_dbsf_feature} where feature_id=$feature_id";
+      $res_pass      = db_fetch_array(db_query($pass_check));
+      $pass_existing = $res_pass['passkey'];
+      if ($pass_existing != $passkey) {
+        return TRUE;
+      }
+    }
+    $data['general'] = array(
+      'uname' => $uname,
+      'feature_id' => $feature_id,
+      'dbxref_id' => $res['dbxref_id'],
+      'accession' => $res['accession'],
+      'db_name' => $res['db_name'],
+      'sequence' => $res['residues'],
+      // 1 is always 'construct'
+      'organism_id' => $res['organism_id'],
+      'tax_class' => $res['tax_class'],
+      'tax_order' => $res['tax_order'],
+      'tax_family' => $res['tax_family'],
+      'genus' => $res['genus'],
+      'species' => $res['species'],
+      'ncbi_taxid' => $res['ncbi_taxid'],
+      'type_name' => $res['type_name'],
+    );
+
+    //feature_cvterm
+    $sql = 'SELECT cvterm.name as cvterm_name,cv.name as cv_name from {gmod_dbsf_feature_cvterm} as feature_cvterm ' . ' JOIN {gmod_dbsf_cvterm} as cvterm ON feature_cvterm.cvterm_id=cvterm.cvterm_id' . ' JOIN {gmod_dbsf_cv} as cv ON cv.cv_id=cvterm.cv_id ' . ' WHERE feature_cvterm.feature_id='. $data['general']['feature_id'];
+    $db_res = db_query($sql);
+    while ($res = db_fetch_array($db_res)) {
+      $data['cvterm'][$res['cv_name']][] = $res['cvterm_name'];
+    }
+    //and featureprop
+    $sql = 'SELECT cvterm.name as cvterm_name,value from {gmod_dbsf_featureprop} as featureprop ' . ' JOIN {gmod_dbsf_cvterm} as cvterm ON featureprop.type_id=cvterm.cvterm_id' . ' WHERE featureprop.feature_id='. $data['general']['feature_id'];
+    $db_res = db_query($sql);
+    while ($res = db_fetch_array($db_res)) {
+      $data['prop'][$res['cvterm_name']][] = $res['value'];
+    }
+    return $data;
+  }
+}
+
+function genes4all_experiment_resource_get($id = NULL, $type = NULL, $override = FALSE) {
+  $passkey     = check_plain($_SESSION['passkey']);
+  $resource_id = '';
+  $data        = array();
+  if (empty($passkey) && empty($override)) {
+    return FALSE;
+  }
+  if (empty($id)) {
+    $sql = 'SELECT resource_id,uniquename from {gmod_dbsf_resource} WHERE TRUE ';
+    if (empty($override)) {
+      $sql .= " AND passkey='$passkey'";
+    }
+    if (!empty($type)) {
+      $sql .= " AND type_id=(SELECT cvterm_id from {gmod_dbsf_cvterm} where name='$type')";
+    }
+    $res = db_query($sql);
+    while ($row = db_fetch_array($res)) {
+      if (!empty($row['resource_id'])) {
+        $data[$row['resource_id']] = $row['uniquename'];
+      }
+    }
+    return $data;
+  }
+
+  $sql = 'SELECT resource.uniquename,resource_id,resource.dbxref_id,dbxref.accession,db.name as db_name,resource.organism_id,tax_class,tax_order,tax_family,' . 'genus,species,ncbi_taxid,cvterm.name as type_name from {gmod_dbsf_resource} as resource JOIN ' . ' {gmod_dbsf_dbxref} as dbxref ON dbxref.dbxref_id=resource.dbxref_id JOIN {gmod_dbsf_db} as db ON db.db_id=dbxref.db_id ' . ' JOIN {gmod_dbsf_organism} as organism ON organism.organism_id=resource.organism_id ' . ' JOIN {gmod_dbsf_cvterm} as cvterm ON cvterm.cvterm_id=resource.type_id';
+
+  if (is_numeric($id)) {
+    $sql .= " where resource_id=$id";
+  }
+  else {
+    $sql .= " where uniquename='$id'";
+  }
+  $res         = db_fetch_array(db_query($sql));
+  $uname       = $res['uniquename'];
+  $resource_id = $res['resource_id'];
+  if (!$resource_id) {
+    //none exists
+    return 1;
+  }
+  else {
+    if (empty($override)) {
+      $pass_check    = "SELECT passkey from {gmod_dbsf_resource} where resource_id=$resource_id";
+      $res_pass      = db_fetch_array(db_query($pass_check));
+      $pass_existing = $res_pass['passkey'];
+      if ($pass_existing != $passkey) {
+        return TRUE;
+      }
+    }
+    $data['general'] = array(
+      'uname' => $uname,
+      'resource_id' => $resource_id,
+      'dbxref_id' => $res['dbxref_id'],
+      'accession' => $res['accession'],
+      'db_name' => $res['db_name'],
+      'organism_id' => $res['organism_id'],
+      'tax_class' => $res['tax_class'],
+      'tax_order' => $res['tax_order'],
+      'tax_family' => $res['tax_family'],
+      'genus' => $res['genus'],
+      'species' => $res['species'],
+      'ncbi_taxid' => $res['ncbi_taxid'],
+      'type_name' => $res['type_name'],
+    );
+
+    //resource_cvterm
+    $sql = 'SELECT cvterm.name as cvterm_name,cv.name as cv_name from {gmod_dbsf_resource_cvterm} as resource_cvterm ' . ' JOIN {gmod_dbsf_cvterm} as cvterm ON resource_cvterm.cvterm_id=cvterm.cvterm_id' . ' JOIN {gmod_dbsf_cv} as cv ON cv.cv_id=cvterm.cv_id ' . ' WHERE resource_cvterm.resource_id='. $data['general']['resource_id'];
+    $db_res = db_query($sql);
+    while ($res = db_fetch_array($db_res)) {
+      $data['cvterm'][$res['cv_name']][] = $res['cvterm_name'];
+    }
+    //and resourceprop
+    $sql = 'SELECT cvterm.name as cvterm_name,value from {gmod_dbsf_resourceprop} as resourceprop ' . ' JOIN {gmod_dbsf_cvterm} as cvterm ON resourceprop.type_id=cvterm.cvterm_id' . ' WHERE resourceprop.resource_id='. $data['general']['resource_id'];
+    $db_res = db_query($sql);
+    while ($res = db_fetch_array($db_res)) {
+      $data['prop'][$res['cvterm_name']][] = $res['value'];
+    }
+    //dpm($data);
+    return $data;
+  }
+}
+

@@ -1,0 +1,36 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the genes4all_explore module
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/**
+ * Implementation of hook_install ().
+ */
+function genes4all_explore_install() {
+   drupal_install_schema('genes4all_explore');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function genes4all_explore_uninstall() {
+  gmod_dbsf_get_add_var('genes4all_explore_gbrowse_link', 'DELETE');
+  gmod_dbsf_get_add_var('genes4all_explore_external_search_name', 'DELETE');
+  gmod_dbsf_get_add_var('genes4all_explore_external_search_link', 'DELETE');
+  drupal_uninstall_schema('genes4all_explore');
+}
+
+function genes4all_explore_schema() {
+  $schema=array();
+  $schema['cache_genes4all_explore_feature'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_genes4all_explore_feature_plots'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_genes4all_explore_library'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_genes4all_explore'] = drupal_get_schema_unprocessed('system', 'cache');
+  return $schema;
+}
+

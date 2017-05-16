@@ -1,0 +1,48 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the genes4all module
+ *
+ * NB Needs a postgres database.
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ * @see genes4all.module
+ */
+
+/**
+ * Start a hook_install() with added queries.
+ *
+ * NB Needs a postgres database.
+ * Also installs a number CVs and performs a number of DB alterations that
+ * the Drupal schema API will not handle.
+ */
+function genes4all_install() {
+  db_query("UPDATE {system} SET weight = -1 WHERE name = 'genes4all'");
+}
+
+/**
+ * Implementation of hook_uninstall().
+ *
+ * Not used yet
+ */
+function genes4all_uninstall() {}
+
+/**
+ * Implementation of hook_enable().
+ *
+ * Not used yet.
+ */
+function genes4all_enable() {}
+
+/**
+ * Implementation of hook_disable().
+ *
+ * Not used yet.
+ */
+function genes4all_disable() {}
+
+
+
+

@@ -1,0 +1,212 @@
+;$Id:$
+
+The installation of a working server with BioPerl is needed for these modules to work. 
+Naturally, Chado needs to be installed should you wish to use.
+
+The installation and support of these external programs is beyond the scope of this 
+project. For BioPerl you can receive support from http://bioperl.org and for Chado
+from http://gmod.org
+
+However, here are the instruction I use for installing BioPerl, EMBOSS and Chado on my Ubuntu
+servers (8.04 +).
+
+These instructions assume you have some basic administration skills. If in doubt, ask your system
+administrator (or a friend or google for a relevant forum topic).
+
+An already initialized empty Chado database can be downloaded from the GMOD-DBSF website and feel
+free to use it if you don't mind having slightly out of date Gene Ontology terms. If you happen to
+use Virtual Machines, then this VM is available for download from the InsectaCentral website at
+http://insectacentral.org/VM.
+
+
+If you have suggestions on how to improve this documentation, please write to me.
+Thanks
+alexie
+-- 
+Alexie Papanicolaou
+OCE PostDoctoral Fellow in Bioinformatics
+CSIRO Ecosystem Sciences
+Black Mountain Labs
+Clunies Ross St
+Canberra ACT 2601
+Australia
+
+
+Dependencies
+============
+
+# Update your server's aptitude
+$ sudo aptitude update
+# Install some necessary programs including Apache and PHP
+$ sudo aptitude -y install libgd2-xpm-dev graphviz libpq-dev xsltproc libxml2-dev libdbd-sqlite \
+mysql-server makepatch curl ncftp lynx patch libexpat1-dev libxslt-dev libgdbm-dev \
+libmysqlclient15-dev libgdome2-0 libgdome2-dev libgdome2-0 libgdome2-dev libglib2.0-dev gawk \
+build-essential libgdome2-cpp-smart-dev wget unzip ftp cvs subversion libtool pgadmin3 \
+apache2-mpm-prefork apache2 apache2-prefork-dev libapache2-mod-perl2 libapache2-mod-php5 \
+php5 php5-gd imagemagick php-pear php5-pgsql php5-mysql php5-xsl
+
+# After you install Apache, enable mod_rewrite and mod_perl
+$ sudo a2enmod rewrite perl php5
+# Restart Apache
+$ sudo apache2ctl restart
+
+# For BioPerl to build, you must have PostGres installed locally. If you don't want to have a
+postgres installed locally, 
+# you still need to install it and then remove it in order to get the postgres test to pass.
+
+$ sudo aptitude -y install postgresql postgresql-contrib postgresql-contrib postgresql-common
+postgresql-client-common postgresql-plperl
+
+# To remove, just exchange the word install above to remove. 
+
+CPAN
+====
+Tips:
+1) When installing a new system, cpan may be so old, that passive ftp is not enabled by default.
+this
+means that when you start cpan for the first time to configure it, getting the sources will take
+forever. 
+So stop the manual configuration and set passive ftp =1 by 
+locate and edit libnet.cfg
+
+2) Setting o conf follow_prereq to follow will help a lot! 
+3) Don't forget to o conf commit (or set autocommit)
+
+Begin with updating your CPAN installation.
+
+$ sudo cpan YAML CPAN::SQLite Module::Build  YAML::XS ExtUtils::ParseXS Compress::Raw::Bzip2 \
+Compress::Raw::Zlib Digest::SHA
+$ sudo cpan;force install Scalar::Util IO::String (force update)
+$ sudo cpan Test::Pod Test::Pod::Coverage Test::Harness Test::Output Test::Deep \
+ExtUtils::CBuilder ExtUtils::MakeMaker IO::Compress::Bzip2 PadWalker Module::Signature \
+Pod::Readme PAR::Dist XML::XPath DBIx::DBSchema XS::Writer Data::Stag \
+Parse::RecDescent XML::Writer CPAN::SQLite 
+
+$ sudo cpan Bundle::CPAN
+this requires supervision to press some return keys....
+$ sudo cpan o conf init
+enable --uninst and follow prereq for both builders; enable sqlite
+
+I do this before any bioperl module is installed:
+cpan update
+but it might break programs that depend on old CPAN modules.
+
+# If postgres is installed, make sure there is a root superuser createuser root:
+$ sudo su postgres
+$ createuser root # with full priviliges
+$ createuser <yourusername> # with whatever privileges you think your username should have (we use
+superuser for administrator users so they don't have to sudo everytime)
+
+BIOPERL
+=======
+
+#Install some BioPerl dependencies (and also for est2assembly)
+$ sudo cpan IO::String Image::Info Text::Shellwords File::Temp Class::Base \
+Statistics::Descriptive GD::Graph GD::Graph::boxplot Statistics::Test::WilcoxonRankSum \
+Log::Dispatch Test::Pod Text::RecordParser DBD::Pg DBI Template::Stash::XS Template DBIx::DBStag \
+XML::Simple LWP Log::Log4perl XML::Parser::PerlSAX Graph Digest::MD5 Text::Shellwords \
+SQL::Translator  GD CGI CGI::Simple GO::Parser GD::SVG CGI::Session Graph SOAP::Lite SVG::Graph \
+Algorithm::Diff Math::Random Spreadsheet::ParseExcel GraphViz Array::Compare Convert::Binary::C \
+Algorithm::Munkres HTML::HeadParser Set::Scalar Spreadsheet::WriteExcel XML::SAX::Writer \
+XML::DOM::XPath PostScript::TextBlock Time::Progress  XML::Twig Clone XML::LibXML Bundle::GMOD \
+Module::Load Ace JSON  Bio::Graphics Safe::World DB_File::Lock XML::Quote URI::Escape
+
+# Note that Safe::World is not installable in Perl version after 5.8. It is not needed but any
+# serious operation. 
+
+# The latest BioPerl is not installed, but the latest stable release might be (depending if the
+BioPerl guys have commited it to CPAN).
+# If you want the absolute latest, go to http://bioperl.org and follow the instructions.
+
+
+EMBOSS (not needed for Drupal but nice to have):
+=================================================
+Easy, option A) 
+#  install from repository: 
+$ aptitude install emboss
+Latest version, Option B)
+# Install from Website : ftp://emboss.open-bio.org/pub/EMBOSS/EMBOSS-latest.tar.gz
+first do this 
+$ sudo apt-get build-dep emboss
+$ aptitude install libplplot-dev
+you may have to redo the aclocal, autoconf (see readme), copy the libtool as well.
+
+
+GBrowse
+=======
+
+Download and use this cool script:
+$ wget
+http://gmod.svn.sourceforge.net/viewvc/gmod/Generic-Genome-Browser/trunk/bin/gbrowse_netinstall.pl
+$ ./gbrowse_netinstall.pl
+
+Chado
+=====
+
+GMOD-DBSF expects two roles (PostGres usernames): 
+
+ * chado_dbadmin which has DB creation rights (only)
+ * chado_dbuser which has no special rights
+ ** Create them using the createuser command
+
+From the GMOD-DBSF project website, You can then download an empty Chado database which has the
+Ontologies preloaded (which might be slightly out-of-date but because it takes such a long time 
+to make a new one, this is good enough for testing or small projects).
+
+$ wget http://gmod-dbsf.googlecode.com/files/chado_empty.psql.bz2
+$ bunzip chado_empty.psql.bz2
+$ createdb chado -O chado_dbadmin
+$ psql -q chado -f chado_empty.psql
+
+Then install GMOD & the relevant tools:
+See http://gmod.org/wiki/Chado for details
+
+# Download from SVN:
+$ svn co https://gmod.svn.sourceforge.net/svnroot/gmod/schema/trunk
+$ cd trunk/chado
+
+Follow the instructions in the INSTALL.Chado file, including the installation of the prerequisites.
+
+You don't have to create a database (make schema) if you use the downloaded database.
+ 
+Note:
+ * For GMOD-DBSF to work, you need to have the name 'chado' as part of you chado database name
+ * It must be owned by user chado_dbadmin (as above) and user chado_dbuser must have select
+permissions. Use the following function to accomplish that easily
+
+Function to grant access(select,insert,update,delete) to users
+Usage: select pg_grant('username','permissions comma delimited');
+
+$ psql chado
+# Then execute the following within PostGres:
+CREATE LANGUAGE plpgsql ;
+CREATE OR REPLACE FUNCTION pg_grant(TEXT, TEXT)
+RETURNS integer AS '
+DECLARE obj record;
+num integer;
+BEGIN
+num:=0;
+FOR obj IN SELECT relname FROM pg_class c
+JOIN pg_namespace ns ON (c.relnamespace = ns.oid) WHERE
+relkind in (''r'',''v'',''S'') AND
+nspname = ''public'' AND
+relname LIKE ''%''
+LOOP
+EXECUTE ''GRANT '' || $2 || '' ON '' || obj.relname || '' TO '' || $1;
+num := num + 1;
+END LOOP;
+RETURN num;
+END;
+' LANGUAGE plpgsql ;
+
+$ psql chado
+$ select pg_grant('"chado_dbuser"','select');
+
+
+Virtual Machines
+================
+
+If you're using a VM system, then an Ubuntu 9.10 Desktop amd64 VM with the above already installed, is available
+from http://insectacentral.org/VM
+
+

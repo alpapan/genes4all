@@ -1,0 +1,15 @@
+// $Id:$
+
+CHANGELOG
+
+genes4all 6.x-0.9 (dev)
+=======================
+
+  * First public release as a beta
+
+  NB: Please visit update.php to apply pending updates.
+
+genes4all 6.x-1.0
+==================
+ * After rebranding, this module contains only visualization/user interface functions
+  

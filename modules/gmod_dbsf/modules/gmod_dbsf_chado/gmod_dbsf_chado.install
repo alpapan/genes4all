@@ -1,0 +1,158 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the Chado API for use with other ic* modules
+ *
+ * NB Needs a postgres database.
+ * In the settings.php two databases are needed:
+ * 'chado' -> read only access using user chado_dbuser
+ * 'chado_edit' -> read-write access using user chado_dbadmin
+ * NB Ensure that the password and access right in pg_hba.conf are correct.
+ *
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ * @see gmod_dbsf_chado.module
+ */
+
+/**
+ * Start a hook_install() with added queries.
+ *
+ * NB Needs a postgres database.
+ * Also installs a number CVs and performs a number of DB alterations that
+ * the Drupal schema API will not handle.
+ */
+function gmod_dbsf_chado_install() {
+  $operations = array();
+  // the following occurs on the Drupal database
+  gmod_dbsf_install_pgfunction('ic_accession_serial', "CREATE  OR REPLACE FUNCTION ic_accession_serial(varchar) RETURNS int AS $$ SELECT substring($1 from e'\\d+$')::int; $$ LANGUAGE SQL IMMUTABLE STRICT");
+  gmod_dbsf_install_pgfunction('ic_accession_assembly',"CREATE  OR REPLACE FUNCTION ic_accession_assembly(varchar) RETURNS char(2) AS $$ SELECT substring(substring($1, e'^\\w{2}\\d+[A-Z][a-z]') from length(substring($1, e'^\\w{2}\\d+[A-Z][a-z]') )-1 for 2 ); $$ LANGUAGE SQL IMMUTABLE STRICT");
+  gmod_dbsf_drupal_set_message('Installed Drupal functions','warning');
+  gmod_dbsf_chado_install_cvs('drupal');
+  gmod_dbsf_drupal_set_message('Installed Drupal CVs','warning');
+  //Chado database
+  gmod_dbsf_db_execute('chado_edit', 'gmod_dbsf_chado_install_cvs','chado');
+  gmod_dbsf_drupal_set_message('Installed GMOD CVs','warning');
+  // The following occurs on the Chado database:
+  //tables views
+  $name = "organism_ncbi_taxa";
+  $spec = "SELECT organism_dbxref.organism_id, dbxref.description, dbxref.accession AS ncbi_taxid FROM organism_dbxref JOIN dbxref ON organism_dbxref.dbxref_id = dbxref.dbxref_id ORDER BY dbxref.description";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "blast_organism";
+  $spec = "SELECT feature.feature_id, feature.organism_id, featureprop.value FROM featureprop JOIN feature ON featureprop.feature_id = feature.feature_id WHERE featureprop.type_id = (( SELECT cvterm.cvterm_id FROM cvterm WHERE cvterm.name::text = 'inferred from electronic annotation'::text AND cvterm.is_obsolete = 0 LIMIT 1))";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "cvterm_organism";
+  $spec = "SELECT cvterm.cvterm_id, cvterm.name AS cvterm_name, cv.name AS cv_name, feature.feature_id, feature.organism_id FROM cvterm, cv, feature_cvterm, feature WHERE cv.cv_id = cvterm.cv_id AND cvterm.cvterm_id = feature_cvterm.cvterm_id AND feature.feature_id = feature_cvterm.feature_id ORDER BY cv.name, lower(cvterm.name::text)";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "dbxref_organism";
+  $spec = "SELECT feature_dbxref.dbxref_id, dbxref.description AS dbxref_name, db.name AS db_name, feature.feature_id, feature.organism_id, dbxrefprop.value AS dbxref_property FROM feature_dbxref, dbxref, db, feature, dbxrefprop WHERE dbxref.dbxref_id = dbxrefprop.dbxref_id AND db.db_id = dbxref.db_id AND feature_dbxref.dbxref_id = dbxref.dbxref_id AND feature.feature_id = feature_dbxref.feature_id AND dbxref.description IS NOT NULL AND dbxref.description <> ''::text ORDER BY db.name, lower(dbxref.description)";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "gff3view";
+  $spec = "SELECT f.feature_id, sf.name AS ref, dbx.accession AS source, cv.name AS type, fl.fmin + 1 AS fstart, fl.fmax AS fend, af.significance AS score, fl.strand, fl.phase, f.seqlen, f.name, f.organism_id FROM feature f LEFT JOIN featureloc fl ON f.feature_id = fl.feature_id LEFT JOIN feature sf ON fl.srcfeature_id = sf.feature_id LEFT JOIN feature_dbxref fd ON f.feature_id = fd.feature_id LEFT JOIN dbxref dbx ON dbx.dbxref_id = fd.dbxref_id AND (dbx.db_id IN ( SELECT db.db_id FROM db WHERE db.name::text = 'GFF_source'::text)) LEFT JOIN cvterm cv ON f.type_id = cv.cvterm_id LEFT JOIN analysisfeature af ON f.feature_id = af.feature_id";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "gff3atts";
+  $spec = "((((((((( SELECT fs.feature_id, 'Ontology_term' AS type,CASE WHEN db.name::text ~~ '%Gene Ontology%'::text THEN ('GO:'::text || dbx.accession::text)::character varying WHEN db.name::text ~~ 'Sequence Ontology%'::text THEN ('SO:'::text || dbx.accession::text)::character varying ELSE ((db.name::text || ':'::text) || dbx.accession::text)::character varying END AS attribute FROM cvterm s, dbxref dbx, feature_cvterm fs, db WHERE fs.cvterm_id = s.cvterm_id AND s.dbxref_id = dbx.dbxref_id AND db.db_id = dbx.db_id UNION ALL SELECT fs.feature_id, 'Dbxref' AS type, (d.name::text || ':'::text) || s.accession::text AS attribute FROM dbxref s, feature_dbxref fs, db d WHERE fs.dbxref_id = s.dbxref_id AND s.db_id = d.db_id AND d.name::text <> 'GFF_source'::text) UNION ALL SELECT f.feature_id, 'Alias' AS type, s.name AS attribute FROM synonym s, feature_synonym fs, feature f WHERE fs.synonym_id = s.synonym_id AND f.feature_id = fs.feature_id AND f.name::text <> s.name::text AND f.uniquename <> s.name::text) UNION ALL SELECT fp.feature_id, cv.name AS type, fp.value AS attribute FROM featureprop fp, cvterm cv WHERE fp.type_id = cv.cvterm_id) UNION ALL SELECT fs.feature_id, 'pub' AS type, (s.series_name::text || ':'::text) || s.title AS attribute FROM pub s, feature_pub fs WHERE fs.pub_id = s.pub_id) UNION ALL SELECT fr.subject_id AS feature_id, 'Parent' AS type, parent.uniquename AS attribute FROM feature_relationship fr, feature parent WHERE fr.object_id = parent.feature_id AND fr.type_id = (( SELECT cvterm.cvterm_id FROM cvterm WHERE cvterm.name::text = 'part_of'::text AND cvterm.cv_id = (( SELECT cv.cv_id FROM cv WHERE cv.name::text = 'relationship'::text))))) UNION ALL SELECT fr.subject_id AS feature_id, 'Derived_from' AS type, parent.uniquename AS attribute FROM feature_relationship fr, feature parent WHERE fr.object_id = parent.feature_id AND fr.type_id = (( SELECT cvterm.cvterm_id FROM cvterm WHERE cvterm.name::text = 'derives_from'::text AND cvterm.cv_id = (( SELECT cv.cv_id FROM cv WHERE cv.name::text = 'relationship'::text))))) UNION ALL SELECT fl.feature_id, 'Target' AS type, (((((target.name::text || ' '::text) || (fl.fmin + 1)) || ' '::text) || fl.fmax) || ' '::text) || fl.strand AS attribute FROM featureloc fl, feature target WHERE fl.srcfeature_id = target.feature_id AND fl.rank <> 0) UNION ALL SELECT feature.feature_id, 'ID' AS type, feature.uniquename AS attribute FROM feature WHERE NOT (feature.type_id IN ( SELECT cvterm.cvterm_id FROM cvterm WHERE cvterm.name::text = 'CDS'::text))) UNION ALL SELECT feature.feature_id, 'chado_feature_id' AS type, feature.feature_id::character varying AS attribute FROM feature) UNION ALL SELECT feature.feature_id, 'Name' AS type, feature.name AS attribute FROM feature";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "library_feature_contigs";
+  $spec = "SELECT contigfeat.feature_id, library_feature.library_id FROM feature contigfeat JOIN featureloc contigloc ON contigloc.srcfeature_id = contigfeat.feature_id JOIN featureloc readloc ON contigloc.feature_id = readloc.feature_id JOIN library_feature ON readloc.srcfeature_id = library_feature.feature_id WHERE contigfeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'contig'::text AND cv.name::text = 'sequence'::text))";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = "library_feature_cvterm";
+  $spec = "SELECT library_feature.library_id, feature_cvterm.cvterm_id, pepfeat.feature_id FROM featureloc locorf JOIN feature orffeat ON locorf.feature_id = orffeat.feature_id JOIN featureloc contigloc ON contigloc.srcfeature_id = locorf.srcfeature_id JOIN feature contigfeat ON contigloc.srcfeature_id = contigfeat.feature_id JOIN featureloc estloc ON estloc.feature_id = contigloc.feature_id JOIN library_feature ON estloc.srcfeature_id = library_feature.feature_id JOIN feature pepfeat ON pepfeat.name::text = replace(\"substring\"(orffeat.name::text, '[A-Z][A-Z][0-9]+[A-Z][a-z]Aorf[0-9]+'::text), 'Aorf'::text, 'Apep'::text) JOIN feature_cvterm ON feature_cvterm.feature_id = pepfeat.feature_id JOIN cvterm pepcvterm ON feature_cvterm.cvterm_id = pepcvterm.cvterm_id JOIN cv pepcv ON pepcvterm.cv_id = pepcv.cv_id WHERE orffeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'ORF'::text AND cv.name::text = 'sequence'::text)) AND contigfeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'contig'::text AND cv.name::text = 'sequence'::text))";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = 'library_feature_dbxref';
+  $spec = "SELECT library_feature.library_id, feature_dbxref.dbxref_id, pepfeat.feature_id FROM featureloc locorf JOIN feature orffeat ON locorf.feature_id = orffeat.feature_id JOIN featureloc contigloc ON contigloc.srcfeature_id = locorf.srcfeature_id JOIN feature contigfeat ON contigloc.srcfeature_id = contigfeat.feature_id JOIN featureloc estloc ON estloc.feature_id = contigloc.feature_id JOIN library_feature ON estloc.srcfeature_id = library_feature.feature_id JOIN feature pepfeat ON pepfeat.name::text = replace(\"substring\"(orffeat.name::text, '[A-Z][A-Z][0-9]+[A-Z][a-z]Aorf[0-9]+'::text), 'Aorf'::text, 'Apep'::text) JOIN feature_dbxref ON feature_dbxref.feature_id = pepfeat.feature_id JOIN dbxref pepdbxref ON feature_dbxref.dbxref_id = pepdbxref.dbxref_id JOIN db pepdb ON pepdbxref.db_id = pepdb.db_id WHERE orffeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'ORF'::text AND cv.name::text = 'sequence'::text)) AND contigfeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'contig'::text AND cv.name::text = 'sequence'::text)) AND pepdb.name::text = 'InterPro'::text";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = 'library_snpprop';
+  $spec = "SELECT library_feature.library_id, snpfeat.feature_id AS snp_fid, featureprop.type_id, featureprop.value FROM featureloc locsnp JOIN feature snpfeat ON locsnp.feature_id = snpfeat.feature_id JOIN featureloc contigloc ON contigloc.srcfeature_id = locsnp.srcfeature_id JOIN feature contigfeat ON contigloc.srcfeature_id = contigfeat.feature_id JOIN featureloc estloc ON estloc.feature_id = contigloc.feature_id JOIN library_feature ON estloc.srcfeature_id = library_feature.feature_id JOIN featureprop ON featureprop.feature_id = snpfeat.feature_id JOIN cvterm snpcvterm ON featureprop.type_id = snpcvterm.cvterm_id JOIN cv snpcv ON snpcvterm.cv_id = snpcv.cv_id WHERE snpfeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'SNP'::text AND cv.name::text = 'sequence'::text)) AND contigfeat.type_id = (( SELECT cvterm.cvterm_id FROM cvterm JOIN cv ON cvterm.cv_id = cv.cv_id WHERE cvterm.name::text = 'contig'::text AND cv.name::text = 'sequence'::text))";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = 'organism_ncbi_taxa';
+  $spec = "SELECT organism_dbxref.organism_id, dbxref.description, dbxref.accession AS ncbi_taxid FROM organism_dbxref JOIN dbxref ON organism_dbxref.dbxref_id = dbxref.dbxref_id ORDER BY dbxref.description";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  $name = 'type_feature_count_org';
+  $spec = "SELECT t.name AS type, count(*) AS num_features, feature.organism_id FROM cvterm t JOIN feature ON feature.type_id = t.cvterm_id GROUP BY t.name, feature.organism_id";
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_dbviews',array('view_name' => $name, 'spec' => $spec, 'user' => 'chado_dbuser'));
+  gmod_dbsf_drupal_set_message('Installed Chado views','warning');
+  //  create a function which gets the last integer of a string-> get serial of an est2assembly
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_pgfunction','ic_accession_serial', "CREATE  OR REPLACE FUNCTION ic_accession_serial(varchar) RETURNS int AS $$ SELECT substring($1 from e'\\d+$')::int; $$ LANGUAGE SQL IMMUTABLE STRICT");
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_pgfunction','ic_accession_assembly', "CREATE  OR REPLACE FUNCTION ic_accession_assembly(varchar) RETURNS char(2) AS $$ SELECT substring(substring($1, e'^\\w{2}\\d+[A-Z][a-z]') from length(substring($1, e'^\\w{2}\\d+[A-Z][a-z]') )-1 for 2 ); $$ LANGUAGE SQL IMMUTABLE STRICT");
+  // function to easily grant/revoke permissions to all tables
+  gmod_dbsf_db_execute('chado_edit','gmod_dbsf_install_pgfunction','pg_grant',"CREATE OR REPLACE FUNCTION pg_grant(TEXT, TEXT) RETURNS integer AS 'DECLARE obj record; num integer; BEGIN num:=0; FOR obj IN SELECT relname FROM pg_class c JOIN pg_namespace ns ON (c.relnamespace = ns.oid) WHERE relkind in (''r'',''v'',''S'') AND nspname = ''public'' AND relname LIKE ''%'' LOOP EXECUTE ''GRANT '' || $2 || '' ON '' || obj.relname || '' TO '' || $1; num := num + 1; END LOOP; RETURN num; END; ' LANGUAGE plpgsql ;");
+  gmod_dbsf_drupal_set_message('Installed Chado functions','warning');
+  //mat views
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 31536000, 'name' => 'library_snpprop_mat', 'mv_schema' => 'public', 'mv_table' => 'library_snpprop_mat', 'mv_specs' => 'library_id int,snp_fid int,type_id int,value text', 'indexed' => 'library_id', 'query' => 'select distinct * from library_snpprop'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 604800, 'name' => 'dbxref_organism_mat', 'mv_schema' => 'public', 'mv_table' => 'dbxref_organism_mat', 'mv_specs' => 'dbxref_id integer,dbxref_name text,db_name varchar(255),feature_id integer,organism_id integer,dbxref_property text', 'query' => 'select * from dbxref_organism', 'special_index' => 'create INDEX dbxref_organism_mat_idx ON dbxref_organism_mat (feature_id)'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 604800, 'name' => 'cvterm_organism_mat', 'mv_schema' => 'public', 'mv_table' => 'cvterm_organism_mat', 'mv_specs' => 'cvterm_id integer,cvterm_name varchar(1024),cv_name varchar(255),feature_id integer,organism_id integer', 'query' => 'select * from cvterm_organism', 'special_index' => 'create INDEX cvterm_organism_mat_idx ON cvterm_organism_mat (feature_id)'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 31536000, 'name' => 'library_feature_cvterm_mat', 'mv_schema' => 'public', 'mv_table' => 'library_feature_cvterm_mat', 'mv_specs' => 'library_id int,cvterm_id int,feature_id int', 'indexed' => 'library_id', 'query' => 'select * from library_feature_cvterm'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 31536000, 'name' => 'library_feature_dbxref_mat', 'mv_schema' => 'public', 'mv_table' => 'library_feature_dbxref_mat', 'mv_specs' => 'library_id int,dbxref_id int,feature_id int', 'indexed' => 'library_id', 'query' => 'select * from library_feature_dbxref'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 604800, 'name' => 'gff3view', 'mv_schema' => 'public', 'mv_table' => 'gff3view_mat', 'mv_specs' => 'feature_id integer,ref varchar(255),source varchar(255),type varchar(1024),fstart integer,fend integer,score float8,strand int2,phase integer,seqlen integer,name varchar(255),organism_id integer', 'indexed' => 'name', 'query' => "select * from gff3view where source=\'assembly\' and (type=\'read\' OR type=\'contig\')", 'special_index' => "create index gff3view_mat_idx ON gff3view_mat ( ref,source,type)"));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 31536000, 'name' => 'library_feature_contigs_mat', 'mv_schema' => 'public', 'mv_table' => 'library_feature_contigs_mat', 'mv_specs' => 'feature_id int,library_id int', 'indexed' => 'library_id', 'query' => 'select distinct feature_id,library_id from library_feature_contigs'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 604800, 'name' => 'type_feature_count_org', 'mv_schema' => 'public', 'mv_table' => 'type_feature_count_org_mat', 'mv_specs' => 'type varchar,num_features bigint,organism_id integer', 'query' => 'select * from type_feature_count_org', 'special_index' => 'create unique index type_feature_count_org_mat_pkey on type_feature_count_org_mat (organism_id,type)'));
+  gmod_dbsf_chadoapi_add_mat_view(array('refresh_time' => 604800, 'name' => 'blast_organism', 'mv_schema' => 'public', 'mv_table' => 'blast_organism_mat', 'mv_specs' => 'feature_id int,organism_id int,value text', 'indexed' => 'value,organism_id', 'query' => 'select * from blast_organism'));
+  gmod_dbsf_drupal_set_message('Installed Chado materialized views','warning');
+  drupal_set_message('You must now run gmod_materialized_view_tool-AP.pl to your Chado database for your materialized views to be prepared.','warning');
+  drupal_set_message('You now have the function pg_grant to easily grant permissions in all tables of your Chado database. Usage: e.g. select pg_grant(\'chado_dbadmin\',\'insert\');.','warning');
+  db_query("UPDATE {system} SET weight = -1 WHERE name = 'gmod_dbsf_chado'");
+}
+
+
+
+function gmod_dbsf_chado_install_cvs($dbtype) {
+  if ($dbtype == 'chado') {
+    gmod_dbsf_add_cv('Evidence Codes', array('inferred from protein separation followed by fragment identification', 'inferred from genomic context', 'Inferred from in vivo assay', 'inferred from animal model system', 'inferred from clinical study', 'inferred from in vitro assay', 'inferred from in vitro culture assay', 'inferred from cell-free assay', 'inferred from enzyme inhibition', 'inferred from immunolocalization of epitope-tagged protein', 'inferred from oligonucleotide microarray', 'inferred from bioassay', 'inferred from electrophoretic mobility shift assay', 'inferred from cDNA microarray', 'inferred from in situ hybridization', 'inferred from fractionation', 'inferred from Affymetrix array', 'inferred from co-fractionation', 'inferred from level of transcript expression determined by microarray analysis', 'inferred from Nimblegen array', 'inferred from level of transcript expression determined by Northern assay', 'inferred from level of transcript expression determined by RT-PCR', 'inferred from RT-PCR experiment', 'inferred from RNA protection assay', 'inferred from Western blot assay', 'inferred from expression library screening', 'inferred from differential hybridization', 'inferred from subtractive hybridization', 'inferred from over expression', 'inferred from protein localization', 'inferred from localization of fusion protein', 'inferred from localization of GFP fusion protein', 'inferred from localization of YFP fusion protein', 'inferred from localiztion of GUS fusion protein', 'inferred from localization of lacZ fusion protein', 'inferred from transport assay', 'inferred from nucleic acid binding assay', 'inferred from ribohomopolymer binding assay', 'inferred from thin layer chromatographic assay', 'inferred from protein:ion binding assay', 'inferred from Southwestern analysis', 'inferred from Northwestern analysis', 'inferred from in vitro binding assay', 'inferred from in vitro transcription reconstitution assay', 'inferred from in vitro transcription reconstitution assay with recombinant protein', 'inferred from protein expression in heterologous system', 'inferred from protein separation', 'inferred from protein separation followed by direct sequencing', 'inferred from uptake assay in a heterologous system', 'inferred from electrophysiological experiment', 'inferred from two-electrode voltage clamp technique', 'inferred from transcription assay', 'inferred from transcriptional activation assay', 'inferred from biochemical trait', 'inferred from physiological response', 'inferred from visible phenotype', 'inferred from compositional similarity', 'inferred from functional complemtation in heterologous system', 'inferred from CpG island microarray experiment', 'inferred from yeast one-hybrid assay', 'inferred from developmental similarity', 'inferred from yeast 2-hybrid assay', 'inferred from differential methylation hybridization', 'inferred from co-immunoprecipitation', 'inferred from morphological similarity', 'inferred from Sos-recruitment assay', 'inferred from genomic analysis', 'inferred from split-ubiquitin assay', 'inferred from gene expression similarity', 'inferred from far-Western assay', 'inferred from methylation-specific PCR', 'inferred from Southern blot hybridization', 'inferred by curator', 'inferred from direct assay', 'inferred from reconstitution assay', 'inferred from cell fractionation', 'inferred from enzyme assay', 'inferred from co-purification', 'inferred from sequence alignment', 'inferred from experiment', 'inferred from sequence orthology', 'inferred from ligand binding', 'inferred from sequence model', 'inferred from protein binding', 'inferred from electronic annotation', 'inferred from hybrid interaction', 'inferred from immunofluorescence', 'inferred from nucleic acid hybridization', 'inferred from expression pattern', 'inferred from structural similarity', 'inferred from transcript expression', 'inferred from protein expression', 'inferred from genetic interaction', 'inferred from motif similarity', 'inferred from functional complementation', 'inferred from transgenic rescue', 'inferred from mutant phenotype', 'inferred from loss-of-function mutant phenotype', 'inferred from ectopic expression', 'inferred from anti-sense experiment', 'inferred from RNAi experiment', 'inferred from specific protein inhibition', 'inferred from physical interaction', 'inferred from InterPro motif similarity', 'inferred from curated BLAST match', 'inferred from curated BLAST match to protein', 'inferred from curated BLAST match to nucleic acid', 'traceable author statement', 'non-traceable author statement', 'no biological data', 'not_recorded', 'inferred from transient rescue', 'inferred from protein assay', 'inferred from immunological assay', 'inferred from similarity', 'inferred from gain-of-function mutant phenotype', 'inferred from in-silico analysis', 'inferred from sequence similarity', 'inferred from spatial pattern of protein expression', 'inferred from level of protein expression', 'inferred from spatial pattern of transcript expression', 'inferred from level of transcript expression', 'inferred from reporter gene assay', 'inferred from voucher specimen', 'inferred from genetic similarity', 'inferred from supressor/enhancer interaction', 'inferred from reviewed computational analysis', 'inferred from double mutant analysis', 'inferred from array experiment', 'inferred from epistatic interaction', 'inferred from phenotypic similarity', 'inferred from expression microarray experiment', 'inferred from phenotype', 'inferred from positional similarity', 'inferred from quantitative trait analysis', 'inferred from genomic microarray experiment', 'inferred from affinity chromatography', 'inferred from phylogeny', 'inferred from targeting sequence prediction', 'inferred from PCR experiment', 'inferred from transmembrane domain prediction', 'inferred from genome cluster', 'inferred from immunoprecipitation', 'inferred from amplification of intermethylated sites', 'inferred from immunolocalization', 'inferred from system reconstruction', 'inferred from restriction landmark genomic scanning', 'inferred from immunogold labelling'));
+    gmod_dbsf_add_cv('publications', array('database record'));
+    gmod_dbsf_add_cv('Library property', array('Note', 'Protocol', 'Description'));
+  }
+  elseif ($dbtype == 'drupal') {
+    gmod_dbsf_add_cv('sequence', array('ORF', 'contig', 'read', 'EST', 'gene', 'polypeptide'));
+  }
+}
+
+
+function gmod_dbsf_chado_enable() {
+  gmod_dbsf_chado_install_cvs('drupal');
+  gmod_dbsf_db_execute('chado_edit', 'gmod_dbsf_chado_install_cvs', 'chado');
+}
+
+function gmod_dbsf_chado_uninstall() {}
+
+/**
+ * Implementats hook_requirements
+ */
+function gmod_dbsf_chado_requirements($phase) {
+  $requirements = array();
+  if ($phase == 'install') {
+    $t = get_t();
+    global $db_url;
+    if (!is_array($db_url) || empty($db_url['chado']) || empty($db_url['chado_edit'])) {
+      $requirements['chado_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('Chado database not found: The gmod_dbsf_chado module was not installed.'.
+          ' Edit the %f file to have the <em>chado</em> and <em>chado_edit</em> databases defined within the $db_url variables.',
+          array('%f' => conf_path() .'/settings.php',
+          )
+        ),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }
+    else {
+      $requirements['chado_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('Chado database found.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+  }
+  return $requirements;
+}
+
+/* TODO function gmod_dbsf_chado_sync_with_drupal(){
+  /** we need to sync/mirror the following tables
+   *   - organism
+   *   The function is written so that it can also be run via cron
+   *   The organism_id value needs not to be synchronised since the
+   *   experiment module data is not kept in chado.
+
+}
+*/
+

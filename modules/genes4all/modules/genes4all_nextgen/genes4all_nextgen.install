@@ -1,0 +1,211 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the genes4all_nextgen module
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/**
+ * Implementation of hook_install ().
+ */
+function genes4all_nextgen_install() {
+  // schema changes to chado
+  $dirpath = file_create_path() .'/nextgen';
+  file_check_directory($dirpath,TRUE);
+  touch($dirpath.'/index.html');
+  gmod_dbsf_db_execute('chado_edit','drupal_install_schema','genes4all_nextgen');
+  gmod_dbsf_db_execute('chado_edit','genes4all_nextgen_foreign_keys');
+  gmod_dbsf_db_execute('chado_edit');
+  db_query('ALTER TABLE {genes4all_nextgen} ADD date_added timestamp with time zone DEFAULT now()');
+  db_query("GRANT SELECT ON {genes4all_nextgen} TO chado_dbuser");
+  db_query("GRANT SELECT ON {genes4all_nextgen_feature} TO chado_dbuser");
+  db_query("GRANT SELECT ON {genes4all_nextgen_library} TO chado_dbuser");
+  db_query("GRANT SELECT ON {genes4all_nextgen_organism} TO chado_dbuser");
+  gmod_dbsf_db_execute();
+}
+
+/**
+ * Implementats hook_requirements
+ */
+function genes4all_nextgen_requirements($phase){
+  $requirements = array();
+
+  if ($phase == 'install') {
+    $t = get_t();
+    $samtools_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'genes4all_nextgen') . '/bin/samtools';
+    $caldepth_exec = gmod_dbsf_drupal_root(). drupal_get_path('module', 'genes4all_nextgen') . '/bin/calDepth';
+    if (!file_exists($samtools_exec)){
+      $requirements['samtools_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('I cannot find the samtools executable as @exec. Installation aborted',array('@exec'=>$samtools_exec)),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }elseif (!is_executable($samtools_exec)){
+      $requirements['samtools_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('The samtools binary @exec is not executable. Installation aborted',array('@exec'=>$samtools_exec)),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }else {
+      $requirements['samtools_found'] = array(
+        'title' => $t('Samtools found'),
+        'description' => $t('Samtools found and is executable.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+    if (!file_exists($caldepth_exec)){
+      $requirements['caldepth_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('I cannot find the calDepth executable as @exec. Installation aborted',array('@exec'=>$caldepth_exec)),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }elseif (!is_executable($caldepth_exec)){
+      $requirements['caldepth_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('The calDepth binary @exec is not executable. Installation aborted',array('@exec'=>$caldepth_exec)),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }else {
+      $requirements['caldepth_found'] = array(
+        'title' => $t('caldepth found'),
+        'description' => $t('calDepth found and is executable.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+    $mat_tables_exist = gmod_dbsf_db_execute('chado','db_table_exists','type_feature_count_org_mat');
+    if ($mat_tables_exist ===FALSE){
+      $requirements['chado_mat'] = array(
+        'title' => $t('Chado materialized'),
+        'description' => $t('Chado materialized views not found. Make sure you have run the materialized views for your Chado db with --auto instructions in gmod_dbsf_chado.'),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }else{
+      $requirements['chado_mat'] = array(
+        'title' => $t('Chado materialized'),
+        'description' => $t('Chado materialized views found.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+  }
+  return $requirements;
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function genes4all_nextgen_uninstall() {
+  gmod_dbsf_db_execute('chado_edit','drupal_uninstall_schema','genes4all_nextgen');
+}
+
+/**
+ * Insert foreign keys as needed
+ *
+ */
+function genes4all_nextgen_foreign_keys() {
+  $keys       = array();
+  $condition  = 'ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  $condition2 = 'ON DELETE SET NULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  //$keys[]="ALTER TABLE {} ADD CONSTRAINT _fkey FOREIGN KEY () REFERENCES {} () $condition";
+  $keys[] = "ALTER TABLE {genes4all_nextgen_library} ADD CONSTRAINT library_id_fkey FOREIGN KEY (library_id) REFERENCES {library} (library_id) $condition";
+  $keys[] = "ALTER TABLE {genes4all_nextgen_organism} ADD CONSTRAINT organism_id_fkey FOREIGN KEY (organism_id) REFERENCES {organism} (organism_id) $condition";
+  $keys[] = "ALTER TABLE {genes4all_nextgen_feature} ADD CONSTRAINT feature_id_fkey FOREIGN KEY (feature_id) REFERENCES {feature} (feature_id) $condition";
+
+  $keys[] = "ALTER TABLE {genes4all_nextgen_library} ADD CONSTRAINT genes4all_nextgen_idfkey FOREIGN KEY (genes4all_nextgen_id) REFERENCES {genes4all_nextgen} (genes4all_nextgen_id) $condition";
+  $keys[] = "ALTER TABLE {genes4all_nextgen_organism} ADD CONSTRAINT genes4all_nextgen_idfkey FOREIGN KEY (genes4all_nextgen_id) REFERENCES {genes4all_nextgen} (genes4all_nextgen_id) $condition";
+  $keys[] = "ALTER TABLE {genes4all_nextgen_feature} ADD CONSTRAINT genes4all_nextgen_idfkey FOREIGN KEY (genes4all_nextgen_id) REFERENCES {genes4all_nextgen} (genes4all_nextgen_id) $condition";
+
+  foreach ($keys as $key_sql) {
+    db_query($key_sql);
+  }
+}
+
+function genes4all_nextgen_schema() {
+  $schema=array();
+  $schema['genes4all_nextgen_library'] = array(
+    'fields' => array(
+      'genes4all_nextgen_library_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+      'library_id' => array(
+        'type' => 'int',
+  ),
+      'genes4all_nextgen_id' => array(
+        'type' => 'int',
+  )),
+    'unique keys' => array(
+      'genes4all_nextgen_library_uidx1' => array('library_id','genes4all_nextgen_id'),
+  ),
+    'primary key' => array('genes4all_nextgen_library_id'),
+  );
+  $schema['genes4all_nextgen_feature'] = array(
+    'fields' => array(
+      'genes4all_nextgen_feature_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+      'feature_id' => array(
+        'type' => 'int',
+  ),
+      'genes4all_nextgen_id' => array(
+        'type' => 'int',
+  )),
+    'unique keys' => array(
+      'genes4all_nextgen_feature_uidx1' => array('feature_id','genes4all_nextgen_id'),
+  ),
+    'primary key' => array('genes4all_nextgen_feature_id'),
+  );
+  $schema['genes4all_nextgen_organism'] = array(
+    'fields' => array(
+      'genes4all_nextgen_organism_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+      'organism_id' => array(
+        'type' => 'int',
+  ),
+      'genes4all_nextgen_id' => array(
+        'type' => 'int',
+  )),
+    'unique keys' => array(
+      'genes4all_nextgen_organism_uidx1' => array('organism_id','genes4all_nextgen_id'),
+  ),
+    'primary key' => array('genes4all_nextgen_organism_id'),
+  );
+  $schema['genes4all_nextgen'] = array(
+    'fields' => array(
+      'genes4all_nextgen_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+      'full_path' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+  ),
+      'description' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+  ),
+  //verified by a master curator:
+      'curator_verified' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+  ),
+      'obsolete' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+  ),
+  ),
+    'unique keys' => array(
+      'genes4all_nextgen_uidx1' => array('full_path'),
+  ),
+    'primary key' => array('genes4all_nextgen_id'),
+  );
+  return $schema;
+}
+

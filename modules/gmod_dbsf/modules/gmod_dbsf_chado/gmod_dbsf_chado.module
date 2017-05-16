@@ -1,0 +1,166 @@
+<?php
+
+/**
+ * @file
+ * Chado integration and helper function
+ *
+ * Most of these methods are running on the chado database via
+ * gmod_dbsf_db_execute, therefore only have one input variable,
+ * or one an assoc. array. This is for historical reasons before the function
+ * was changed to accept extra arguments directly (w/o an assoc. array)
+ *
+ * Also the drupal {tablename} convention is not used here as all functions
+ * run on the Chado database (which cannot have any prefixes).
+ */
+
+/**
+ * Implements hook_menu
+ * items of 'type' MENU_CALLBACK refer to actions parsed by ?q=
+ */
+function gmod_dbsf_chado_menu() {
+    $items = array();
+    //chado data as a web service
+    //@TODO AP - refactor as part of GMOD_DBSF:Chado?
+      $items['gmod_dbsf_chado/projects'] = array(
+    'title' => 'Geospatial Genetics project administration',
+    'description' => 'Create and edit geo-spatially enabled genetic projects',
+    'file' => 'includes/gmod_dbsf_chado_projects.inc',
+    'page callback' => 'gmod_dbsf_chado_page_project_admin',
+    'access arguments' => array('Administer Chado projects'),
+    'type' => MENU_CALLBACK,
+  );
+
+    $items['gmod_dbsf_chado/ws/create'] = array(
+            'title' => 'Create(PUT) resource via chado webservices',
+            'description' => 'Web services to allow users access to their data and enable JavaScript interfaces',
+            'file' => 'includes/gmod_dbsf_chado_webservices.inc',
+            'page callback' => 'gmod_dbsf_chado_ws_create',
+            //ND: Including a session ID in the URL parameter violates REST constrants and makes 6 compulsory.
+            //    we could include it as an & possibly
+            'page arguments' => array(3, 4, 5, 6, 7),//3=db,4=table,5=identifier,6=format(optional),sid
+            //AP: every one is allowed to access this because Ajax is anonymous.
+            //AP: control access with sid
+            //ND: AJAX just utilises HTTP requests. It is not necessarily anonymous, however when routed through a proxy we can't get the ip
+            //ND: Note: sid is stateful and violates REST constraints.
+            //          To comply with RESTful conventions we should use HTTP auth but for that we need
+            //          HTTPS in order to protect user/password
+            'access arguments' => array('Create(PUT) resource via chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+    $items['gmod_dbsf_chado/ws/read'] = array(
+            'title' => 'Read(GET) resource via chado webservices',
+            'description' => 'Web services to allow users access to their data and enable JavaScript interfaces',
+            'file' => 'includes/gmod_dbsf_chado_webservices.inc',
+            'page callback' => 'gmod_dbsf_chado_ws_create',
+            //ND: Including a session ID in the URL parameter violates REST constrants and makes 6 compulsory.
+            //    we could include it as an & possibly
+            'page arguments' => array(3, 4, 5, 6, 7),//3=db,4=table,5=identifier,6=format(optional),sid
+            //AP: every one is allowed to access this because Ajax is anonymous.
+            //AP: control access with sid
+            //ND: AJAX just utilises HTTP requests. It is not necessarily anonymous, however when routed through a proxy we can't get the ip
+            //ND: Note: sid is stateful and violates REST constraints.
+            //          To comply with RESTful conventions we should use HTTP auth but for that we need
+            //          HTTPS in order to protect user/password
+            'access arguments' => array('Read(GET) resource via chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+
+    $items['gmod_dbsf_chado/ws/update'] = array(
+            'title' => 'Update(POST) resource via chado webservices',
+            'description' => 'Web services to allow users access to their data and enable JavaScript interfaces',
+            'file' => 'includes/gmod_dbsf_chado_webservices.inc',
+            'page callback' => 'gmod_dbsf_chado_ws',
+            //ND: Including a session ID in the URL parameter violates REST constrants and makes 6 compulsory.
+            //    we could include it as an & possibly
+            'page arguments' => array(3, 4, 5, 6, 7),//3=db,4=table,5=identifier,6=format(optional),sid
+            //AP: every one is allowed to access this because Ajax is anonymous.
+            //AP: control access with sid
+            //ND: AJAX just utilises HTTP requests. It is not necessarily anonymous, however when routed through a proxy we can't get the ip
+            //ND: Note: sid is stateful and violates REST constraints.
+            //          To comply with RESTful conventions we should use HTTP auth but for that we need
+            //          HTTPS in order to protect user/password
+            'access arguments' => array('Update(POST) resource via chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+    $items['gmod_dbsf_chado/ws/delete'] = array(
+            'title' => 'Delete resource via chado webservices',
+            'description' => 'Web services to allow users access to their data and enable JavaScript interfaces',
+            'file' => 'includes/gmod_dbsf_chado_webservices.inc',
+            'page callback' => 'gmod_dbsf_chado_ws_delete',
+            //ND: Including a session ID in the URL parameter violates REST constrants and makes 6 compulsory.
+            //    we could include it as an & possibly
+            'page arguments' => array(3, 4, 5, 6, 7),//3=db,4=table,5=identifier,6=format(optional),sid
+            //AP: every one is allowed to access this because Ajax is anonymous.
+            //AP: control access with sid
+            //ND: AJAX just utilises HTTP requests. It is not necessarily anonymous, however when routed through a proxy we can't get the ip
+            //ND: Note: sid is stateful and violates REST constraints.
+            //          To comply with RESTful conventions we should use HTTP auth but for that we need
+            //          HTTPS in order to protect user/password
+            'access arguments' => array('Delete resource via chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+    $items['gmod_dbsf_chado/ws'] = array(
+            'title' => 'Chado Web Services',
+            'description' => 'Routes HTTP Create/Read/Update/Delete to PUT/GET/POST/DELETE equivalents',
+            'file' => 'includes/gmod_dbsf_chado_webservices.inc',
+            'page callback' => 'gmod_dbsf_chado_ws',
+            //ND: Including a session ID in the URL parameter violates REST constrants and makes 6 compulsory.
+            //    we could include it as an & possibly
+            'page arguments' => array(2, 3, 4, 5, 6,7),//3=db,4=table,5=identifier,6=format(optional),sid
+            //AP: every one is allowed to access this because Ajax is anonymous.
+            //AP: control access with sid
+            //ND: AJAX just utilises HTTP requests. It is not necessarily anonymous, however when routed through a proxy we can't get the ip
+            //ND: Note: sid is stateful and violates REST constraints.
+            //          To comply with RESTful conventions we should use HTTP auth but for that we need
+            //          HTTPS in order to protect user/password
+            //'access arguments' => array('Access chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+
+    //Echo HTTP Posts
+    $items['gmod_dbsf_chado/post_echo'] = array(
+            'file' => 'includes/gmod_dbsf_chado_post.inc',
+            'page callback' => 'gmod_dbsf_chado_post_echo',
+            'access arguments' => array('Access chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+    //Process HTTP Posts
+    $items['gmod_dbsf_chado/post_receive'] = array(
+            'file' => 'includes/gmod_dbsf_chado_post.inc',
+            'page callback' => 'gmod_dbsf_chado_post_receive',
+            'access arguments' => array('Access chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+    //Request Drupal to do something via an ajax call
+    $items['gmod_dbsf_chado/request'] = array(
+            'file' => 'includes/gmod_dbsf_chado_post.inc',
+            'page callback' => 'gmod_dbsf_chado_post_request',
+            'access arguments' => array('Access chado webservices'),
+            'type' => MENU_CALLBACK,
+    );
+    return $items;
+}
+
+/**
+ * Implementation of hook_perm().
+ * Permissions for module
+ */
+function gmod_dbsf_chado_perm() {
+    //Get all tables from DB
+    //create read/write for each table
+
+
+    return array(
+            /*'Access chado webservices',/*
+            'Create records in chado database',
+            'Read records in chado database',
+            'Update records in chado database',
+            'Delete records in chado database',*/
+            'Create(PUT) resource via chado webservices',
+            'Read(GET) resource via chado webservices',
+            'Update(POST) resource via chado webservices',
+            'Delete resource via chado webservices',
+            'Administer Chado projects',
+    );
+
+}

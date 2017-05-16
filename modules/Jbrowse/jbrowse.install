@@ -1,0 +1,68 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the jbrowse module
+ *
+ * @see jbrowse.module
+ * Developed by Alexie Papanicolaou
+ * CSIRO Ecosystem Sciences
+ */
+
+/**
+ * Implementation of hook_install
+ */
+function jbrowse_install() {
+  $dirpath = file_create_path() .'/jbrowse/';
+  file_check_directory($dirpath, TRUE);
+  touch($dirpath.'/index.html');
+}
+
+/**
+ * Implementation of hook_uninstall
+ */
+function jbrowse_uninstall() {
+}
+
+/**
+function jbrowse_enable() {}
+
+function jbrowse_disable() {}
+*/
+
+/**
+ * Implementats hook_requirements
+ */
+function jbrowse_requirements($phase){
+  $requirements = array();
+  if ($phase == 'install') {
+    $t = get_t();
+    $file_execs = array();
+    $dir = gmod_dbsf_drupal_root(). drupal_get_path('module', 'jbrowse').'/bin/';
+    $file_execs[]=  'bam-to-json.pl';
+    $file_execs[]= 'biodb-to-json.pl';
+    foreach ($file_execs as $file){
+      if (!file_exists($dir.$file)){
+        $requirements[$file.'_found'] = array(
+          'title' => $t($file),
+          'description' => $t('I cannot find an executable @exec. Installation aborted',array('@exec'=>$file)),
+          'severity' => REQUIREMENT_ERROR,
+        );
+      }elseif (!is_executable($dir.$file)){
+        $requirements[$file.'_found'] = array(
+          'title' => $t($file),
+          'description' => $t('The binary @exec is not executable. Installation aborted',array('@exec'=>$file)),
+          'severity' => REQUIREMENT_ERROR,
+        );
+      }else {
+        $requirements[$file.'_found'] = array(
+          'title' => $t($file),
+          'description' => $t('File @exec found and is executable.',array('@exec'=>$file)),
+          'severity' => REQUIREMENT_OK,
+        );
+      }
+    }
+  }
+  return $requirements;
+}

@@ -1,0 +1,812 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the gmod_dbsfmodule
+ *
+ * NB Needs a postgres database.
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ * @see gmod_dbsf.module
+ */
+
+/**
+ * Start a hook_install() with added queries.
+ *
+ * NB Needs a postgres database.
+ * Also installs a number CVs and performs a number of DB alterations that
+ * the Drupal schema API will not handle.
+ */
+function gmod_dbsf_install() {
+  drupal_install_schema('gmod_dbsf');
+  //We have to alter some columns to allow for types that do not exist in Drupal.
+  db_query('ALTER TABLE {gmod_dbsf_feature} ADD COLUMN md5checksum char(32)');
+  db_query('ALTER TABLE {gmod_dbsf_feature} ADD timeaccessioned timestamp with time zone default now()');
+  db_query('ALTER TABLE {gmod_dbsf_feature} ADD timelastmodified timestamp with time zone default now()');
+  db_query('ALTER TABLE {gmod_dbsf_resource} ADD timeaccessioned timestamp with time zone default now()');
+  db_query('ALTER TABLE {gmod_dbsf_study} ADD COLUMN timeaccessioned timestamp with time zone default now()');
+  db_query('ALTER TABLE {gmod_dbsf_software} ADD active boolean');
+  db_query('ALTER TABLE {gmod_dbsf_feature_cvterm} ADD is_not boolean ');
+  db_query('ALTER TABLE {gmod_dbsf_resource_cvterm} ADD is_not boolean');
+  db_query('ALTER TABLE {gmod_dbsf_software} ALTER active set default false');
+  db_query('ALTER TABLE {gmod_dbsf_feature_cvterm} ALTER is_not set default false');
+  db_query('ALTER TABLE {gmod_dbsf_resource_cvterm} ALTER is_not set default false');
+  // Add foreign keys
+  gmod_dbsf_foreign_keys();
+  // Now our schema is built, populate the Controlled Vocabulary table
+  gmod_dbsf_install_cvs();
+  db_query("UPDATE {system} SET weight = -2 WHERE name = 'gmod_dbsf'");
+}
+
+function gmod_dbsf_install_cvs() {
+  db_query("INSERT INTO {gmod_dbsf_organism} (tax_class,tax_order,tax_family,genus,species) VALUES ('general','general','general','general','general')");
+  db_query("INSERT INTO {gmod_dbsf_db} (name,description) VALUES ('null','a fake database for local items')");
+  db_query("INSERT INTO {gmod_dbsf_db} (name) VALUES ('local publication')");
+  db_query("INSERT INTO {gmod_dbsf_db} (name) VALUES ('local study')");
+  db_query("INSERT INTO {gmod_dbsf_db} (name) VALUES ('local feature')");
+  db_query("INSERT INTO {gmod_dbsf_db} (name) VALUES ('local resource')");
+  db_query("INSERT INTO {gmod_dbsf_dbxref} (db_id,accession) VALUES ((SELECT db_id from {gmod_dbsf_db} where name='null'),'local:null')");
+  db_query("INSERT INTO {gmod_dbsf_dbxref} (db_id,accession) VALUES ((SELECT db_id from {gmod_dbsf_db} where name='local publication'),'Unpublished')");
+  db_query("INSERT INTO {gmod_dbsf_cv} (name) VALUES ('resource_property')");
+  db_query("INSERT INTO {gmod_dbsf_cv} (name) VALUES ('relationship')");
+  db_query("INSERT INTO {gmod_dbsf_cvterm} (cv_id,name) VALUES ((SELECT cv_id from {gmod_dbsf_cv} where name='relationship'),'uses')");
+  db_query("INSERT INTO {gmod_dbsf_cvterm} (cv_id,name) VALUES ((SELECT cv_id from {gmod_dbsf_cv} where name='relationship'),'part_of')");
+  db_query("INSERT INTO {gmod_dbsf_pub} (dbxref_id,uniquename) VALUES (1,'none')");
+}
+
+/**
+ * Insert foreign keys as needed
+ *
+ */
+function gmod_dbsf_foreign_keys() {
+  $keys       = array();
+  $condition  = 'ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  $condition2 = 'ON DELETE SET NULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  //$keys[]="ALTER TABLE {} ADD CONSTRAINT _fkey FOREIGN KEY () REFERENCES {} () $condition";
+
+  //dbxref +db
+  $keys[] = "ALTER TABLE {gmod_dbsf_dbxref} ADD CONSTRAINT dbxref_db_id_fkey FOREIGN KEY (db_id) REFERENCES {gmod_dbsf_db} (db_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_feature} ADD CONSTRAINT feature_dbxref_id_fkey FOREIGN KEY (dbxref_id) REFERENCES {gmod_dbsf_dbxref} (dbxref_id) $condition2";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource} ADD CONSTRAINT resource_dbxref_id_fkey FOREIGN KEY (dbxref_id) REFERENCES {gmod_dbsf_dbxref} (dbxref_id) $condition2";
+  $keys[] = "ALTER TABLE {gmod_dbsf_pub} ADD CONSTRAINT pub_dbxref_id_fkey FOREIGN KEY (dbxref_id) REFERENCES {gmod_dbsf_dbxref} (dbxref_id) $condition2";
+  $keys[] = "ALTER TABLE {gmod_dbsf_cvterm} ADD CONSTRAINT cvterm_dbxref_id_fkey FOREIGN KEY (dbxref_id) REFERENCES {gmod_dbsf_dbxref} (dbxref_id) $condition2";
+  $keys[] = "ALTER TABLE {gmod_dbsf_study} ADD CONSTRAINT study_dbxref_id_fkey FOREIGN KEY (dbxref_id) REFERENCES {gmod_dbsf_dbxref} (dbxref_id) $condition";
+
+  //pub + author
+  $keys[] = "ALTER TABLE {gmod_dbsf_pub_author} ADD CONSTRAINT pub_author_pub_id_fkey FOREIGN KEY (pub_id) REFERENCES {gmod_dbsf_pub} (pub_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_pub_author} ADD CONSTRAINT pub_author_author_id_fkey FOREIGN KEY (author_id) REFERENCES {gmod_dbsf_author} (author_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_study} ADD CONSTRAINT study_pub_id_fkey FOREIGN KEY (pub_id) REFERENCES {gmod_dbsf_pub} (pub_id) $condition";
+
+  //organism
+  $keys[] = "ALTER TABLE {gmod_dbsf_feature} ADD CONSTRAINT feature_organism_id_fkey FOREIGN KEY (organism_id) REFERENCES {gmod_dbsf_organism} (organism_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource} ADD CONSTRAINT resource_organism_id_fkey FOREIGN KEY (organism_id) REFERENCES {gmod_dbsf_organism} (organism_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_organismprop} ADD CONSTRAINT organismprop_organism_id_fkey FOREIGN KEY (organism_id) REFERENCES {gmod_dbsf_organism} (organism_id) $condition";
+
+  //cv / cvterms
+  $keys[] = "ALTER TABLE {gmod_dbsf_cvterm} ADD CONSTRAINT cvterm_cv_id_fkey FOREIGN KEY (cv_id) REFERENCES {gmod_dbsf_cv} (cv_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_feature_cvterm} ADD CONSTRAINT feature_cvterm_cvterm_id_fkey FOREIGN KEY (cvterm_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_cvterm} ADD CONSTRAINT resource_cvterm_cvterm_id_fkey FOREIGN KEY (cvterm_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_feature} ADD CONSTRAINT feature_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource} ADD CONSTRAINT resource_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_resource} ADD CONSTRAINT resource_resource_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_featureprop} ADD CONSTRAINT featureprop_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resourceprop} ADD CONSTRAINT resourceprop_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_organismprop} ADD CONSTRAINT organismprop_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm}(cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_softwareprop} ADD CONSTRAINT software_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm}(cvterm_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_study} ADD CONSTRAINT study_type_id_fkey FOREIGN KEY (type_id) REFERENCES {gmod_dbsf_cvterm} (cvterm_id) $condition";
+
+  //feature
+  $keys[] = "ALTER TABLE {gmod_dbsf_featureloc} ADD CONSTRAINT featureloc_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES {gmod_dbsf_feature}(feature_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_featureloc} ADD CONSTRAINT featureloc_srcfeature_id_fkey FOREIGN KEY (srcfeature_id) REFERENCES {gmod_dbsf_feature}(feature_id) $condition2";
+  $keys[] = "ALTER TABLE {gmod_dbsf_feature_cvterm} ADD CONSTRAINT feature_cvterm_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES {gmod_dbsf_feature} (feature_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_featureprop} ADD CONSTRAINT featureprop_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES {gmod_dbsf_feature} (feature_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_study_feature} ADD CONSTRAINT study_feature_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES {gmod_dbsf_feature} (feature_id) $condition";
+
+  //resource
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_role} ADD CONSTRAINT resource_role_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_software_resource} ADD CONSTRAINT software_resource_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resourceprop} ADD CONSTRAINT resourceprop_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_cvterm} ADD CONSTRAINT resource_cvterm_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_resource} ADD CONSTRAINT resource_resource_subject_id_fkey FOREIGN KEY (subject_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_resource} ADD CONSTRAINT resource_resource_object_id_fkey FOREIGN KEY (object_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_study_resource} ADD CONSTRAINT study_resource_resource_id_fkey FOREIGN KEY (resource_id) REFERENCES {gmod_dbsf_resource} (resource_id) $condition";
+
+  //other dbsf
+  $keys[] = "ALTER TABLE {gmod_dbsf_resource_role} ADD CONSTRAINT resource_role_role_id_fkey FOREIGN KEY (role_id) REFERENCES {role} (rid) $condition";
+
+  //software
+  $keys[] = "ALTER TABLE {gmod_dbsf_softwareprop} ADD CONSTRAINT softwareprop_software_id_fkey FOREIGN KEY (software_id) REFERENCES {gmod_dbsf_software} (software_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_software_resource} ADD CONSTRAINT software_resource_software_id_fkey FOREIGN KEY (software_id) REFERENCES {gmod_dbsf_software} (software_id) $condition";
+
+  //study
+  $keys[] = "ALTER TABLE {gmod_dbsf_study_resource} ADD CONSTRAINT study_resource_study_id_fkey FOREIGN KEY (study_id) REFERENCES {gmod_dbsf_study} (study_id) $condition";
+  $keys[] = "ALTER TABLE {gmod_dbsf_study_feature} ADD CONSTRAINT study_feature_study_id_fkey FOREIGN KEY (study_id) REFERENCES {gmod_dbsf_study} (study_id) $condition";
+
+  foreach ($keys as $key_sql) {
+    db_query($key_sql);
+  }
+}
+
+/**
+ * Custom hook_uninstall().
+ *
+ * The dropping of tables with foreign keys is not supported in
+ * Drupal 6. So we customly drop them all together with CASCADE.
+ */
+function gmod_dbsf_uninstall() {
+  //because of foreign keys, we have to drop the tables, manually. This allows CASCADE to work properly
+  $drop_sql = 'DROP TABLE ';
+  $tables = array(
+    '{gmod_dbsf_pub}', '{gmod_dbsf_db}', '{gmod_dbsf_dbxref}', '{gmod_dbsf_author}', '{gmod_dbsf_pub_author}', '{gmod_dbsf_organism}',
+    '{gmod_dbsf_feature}', '{gmod_dbsf_cv}', '{gmod_dbsf_resourceprop}', '{gmod_dbsf_resource_cvterm}',
+    '{gmod_dbsf_cvterm}', '{gmod_dbsf_feature_cvterm}', '{gmod_dbsf_featureprop}', '{gmod_dbsf_resource}',
+    '{gmod_dbsf_resource_resource}', '{gmod_dbsf_featureloc}', '{gmod_dbsf_organismprop}', '{gmod_dbsf_resource_role}',
+    '{gmod_dbsf_software}', '{gmod_dbsf_softwareprop}', '{gmod_dbsf_software_resource}'
+    , '{gmod_dbsf_study}', '{gmod_dbsf_study_resource}', '{gmod_dbsf_study_feature}', '{cache_gmod_dbsf}'
+  );
+  $table_str = implode(',', $tables);
+  db_query($drop_sql . $table_str .' CASCADE');
+  gmod_dbsf_get_add_var('gmod_dbsf_taxonomy_directory', 'DELETE');
+}
+
+/**
+ * Implementation of hook_enable().
+ *
+ * Not used yet.
+ */
+function gmod_dbsf_enable() {}
+
+/**
+ * Implementation of hook_disable().
+ *
+ * Not used yet.
+ */
+function gmod_dbsf_disable() {}
+
+/**
+ * Implementation of hook_schema().
+ *
+ * Currently installs a number of Chado tables. Implements a new table type,
+ * called resource which mimics feature but is aimed for sequence-less features
+ * Also improved the authorship method and added the passkey.
+ */
+function gmod_dbsf_schema() {
+  $schema=array();
+  $schema['cache_gmod_dbsf'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['gmod_dbsf_study'] = array(
+    'fields' => array(
+      'study_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'uniquename' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'submitter_email' => array(
+        'type' => 'varchar',
+        'length' => 40,
+        'not null' => TRUE,
+      ), 'dbxref_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'pub_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'passkey' => array(
+        'type' => 'varchar',
+        'length' => 15,
+        'not null' => TRUE,
+      ), 'description' => array(
+        'type' => 'text',
+      ),
+    ),
+    'unique keys' => array(
+      'study_uidx1' => array('uniquename'),
+    ),
+    'primary key' => array('study_id'),
+  );
+  $schema['gmod_dbsf_study_resource'] = array(
+    'fields' => array(
+      'study_resource_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'study_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'resource_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('study_resource_id'),
+    'unique keys' => array(
+      'study_cvterm_uidx1' => array('study_id', 'resource_id'),
+    ),
+  );
+  $schema['gmod_dbsf_study_feature'] = array(
+    'fields' => array(
+      'study_feature_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'study_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'feature_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('study_feature_id'),
+    'unique keys' => array(
+      'study_cvterm_uidx1' => array('study_id', 'feature_id'),
+    ),
+  );
+
+
+
+  $schema['gmod_dbsf_pub'] = array(
+    'fields' => array(
+      'pub_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'dbxref_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+      ),
+      'uniquename' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+      ),
+      'passkey' => array(
+        'type' => 'varchar',
+        'length' => 15,
+        'not null' => FALSE,
+      ),
+    ),
+    'unique keys' => array(
+      'pub_uidx1' => array('uniquename'),
+    ),
+    'primary key' => array('pub_id'),
+  );
+  $schema['gmod_dbsf_db'] = array(
+    'fields' => array(
+      'db_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+      ), 'description' => array(
+        'type' => 'text',
+      ),
+    ),
+    'unique keys' => array(
+      'db_uidx1' => array('name'),
+    ),
+    'primary key' => array('db_id'),
+  );
+  $schema['gmod_dbsf_dbxref'] = array(
+    'fields' => array(
+      'dbxref_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'accession' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ), 'description' => array(
+        'type' => 'text',
+      ),
+      'db_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'unique keys' => array(
+      'pub_uidx1' => array('db_id', 'accession'),
+    ),
+    'primary key' => array('dbxref_id'),
+  );
+  $schema['gmod_dbsf_author'] = array(
+    'fields' => array(
+      'author_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'first_names' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'last_names' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'email' => array(
+        'type' => 'varchar',
+        'length' => 127,
+        'not null' => TRUE,
+      ),
+      'address' => array(
+        'type' => 'text',
+      ),
+    ),
+    'primary key' => array('author_id'),
+    'unique keys' => array(
+      array('last_names', 'first_names', 'email'),
+    ),
+  );
+  $schema['gmod_dbsf_pub_author'] = array(
+    'fields' => array(
+      'author_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'pub_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'rank' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('author_id', 'pub_id', 'rank'),
+  );
+  $schema['gmod_dbsf_organism'] = array(
+    'fields' => array(
+      'organism_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'tax_class' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+        'length' => 128,
+        'default' => 'Insecta',
+      ), 'tax_order' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+        'length' => 128,
+      ), 'tax_family' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+        'length' => 128,
+      ), 'genus' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+        'length' => 128,
+      ), 'species' => array(
+        'type' => 'varchar',
+        'not null' => TRUE,
+        'length' => 128,
+      ), 'ncbi_taxid' => array(
+        'type' => 'int',
+      ), 'common_name' => array(
+        'type' => 'text',
+      ), 'abbreviation' => array(
+        'type' => 'text',
+      ),
+    ),
+    'primary key' => array('organism_id'),
+    'unique keys' => array(
+      'organism_uidx1' => array('tax_class', 'tax_order', 'tax_family', 'genus', 'species'),
+    ),
+  );
+  $schema['gmod_dbsf_organismprop'] = array(
+    'fields' => array(
+      'organismprop_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'organism_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'value' => array(
+        'type' => 'varchar',
+      ), 'rank' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('organismprop_id'),
+    'unique keys' => array(
+      'organism_uidx1' => array('organism_id', 'type_id', 'rank'),
+    ),
+    'indexes' => array(
+      'organismprop_idx1' => array('organism_id'),
+      'organismprop_idx2' => array('type_id'),
+      'organismprop_idx3' => array('value'),
+    ),
+  );
+
+  $schema['gmod_dbsf_feature'] = array(
+    'fields' => array(
+      'feature_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'uniquename' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+      ), 'name' => array(
+        'type' => 'text',
+      ), 'dbxref_id' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'residues' => array(
+        'type' => 'text',
+      ), 'organism_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+      ), 'passkey' => array(
+        'type' => 'varchar',
+        'length' => 15,
+        'not null' => FALSE,
+      ), 'seqlen' => array(
+        'type' => 'int',
+      ),
+    ),
+    'primary key' => array('feature_id'),
+    'unique keys' => array(
+      'feature_uidx1' => array('uniquename'),
+    ),
+  );
+
+  $schema['gmod_dbsf_featureloc'] = array(
+    'fields' => array(
+      'featureloc_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'feature_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'srcfeature_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'fmin' => array(
+        'type' => 'int',
+      ), 'fmax' => array(
+        'type' => 'int',
+      ), 'strand' => array(
+        'type' => 'int',
+      ), 'phase' => array(
+        'type' => 'int',
+      ), 'locgroup' => array(
+        'type' => 'int',
+        'default' => 0,
+      ), 'rank' => array(
+        'type' => 'int',
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('featureloc_id'),
+    'unique keys' => array(
+      'feature_uidx1' => array('feature_id', 'locgroup', 'rank'),
+    ),
+    'indexes' => array(
+      'featureloc_idx1' => array('feature_id'),
+      'featureloc_idx2' => array('srcfeature_id'),
+      'featureloc_idx3' => array('srcfeature_id', 'fmin', 'fmax'),
+    ),
+  );
+
+  $schema['gmod_dbsf_cv'] = array(
+    'fields' => array(
+      'cv_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+      ), 'definition' => array(
+        'type' => 'text',
+      ),
+    ),
+    'primary key' => array('cv_id'),
+    'unique keys' => array(
+      'cv_uidx1' => array('name'),
+    ),
+  );
+  $schema['gmod_dbsf_cvterm'] = array(
+    'fields' => array(
+      'cvterm_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+      ), 'dbxref_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+      ), 'cv_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'definition' => array(
+        'type' => 'text',
+      ),
+    ),
+    'primary key' => array('cvterm_id'),
+    'unique keys' => array(
+      'cvterm_uidx1' => array('name', 'cv_id'),
+    ),
+  );
+  $schema['gmod_dbsf_feature_cvterm'] = array(
+    'fields' => array(
+      'feature_cvterm_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'feature_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'cvterm_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('feature_cvterm_id'),
+    'indexes' => array(
+      'feature_cvterm_idx1' => array('feature_id', 'cvterm_id'),
+    ),
+  );
+  $schema['gmod_dbsf_featureprop'] = array(
+    'fields' => array(
+      'featureprop_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'feature_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'value' => array(
+        'type' => 'text',
+      ), 'rank' => array(
+        'type' => 'int',
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('featureprop_id'),
+  );
+  $schema['gmod_dbsf_resource'] = array(
+    'fields' => array(
+      'resource_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'uniquename' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+        // 1 if none
+      ), 'organism_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+        // e.g. Stock center
+      ), 'dbxref_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'passkey' => array(
+        'type' => 'varchar',
+        'length' => 15,
+        'not null' => FALSE,
+        // type of material (in RNAi will just be one thing: experimental animal
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'description' => array(
+        'type' => 'text',
+      ),
+    ), 'unique keys' => array(
+      'resource_uidx1' => array('uniquename'),
+    ),
+    'primary key' => array('resource_id'),
+  );
+  $schema['gmod_dbsf_resource_cvterm'] = array(
+    'fields' => array(
+      'resource_cvterm_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'resource_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'cvterm_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('resource_cvterm_id'),
+    'indexes' => array(
+      'resource_cvterm_idx1' => array('resource_id', 'cvterm_id'),
+    ),
+  );
+  $schema['gmod_dbsf_resourceprop'] = array(
+    'fields' => array(
+      'resourceprop_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'resource_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'value' => array(
+        'type' => 'text',
+      ), 'rank' => array(
+        'type' => 'int',
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('resourceprop_id'),
+  );
+  $schema['gmod_dbsf_resource_resource'] = array(
+    'fields' => array(
+      'resource_resource_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'subject_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'object_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('resource_resource_id'),
+    'unique keys' => array(
+      'resource_resource_uidx1' => array('subject_id', 'object_id'),
+    ),
+  );
+  // each blastdb can have more than one role.
+  $schema['gmod_dbsf_resource_role'] = array(
+    'fields' => array(
+      'resource_role_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'role_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'resource_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'unique keys' => array('role_uidx' => array('resource_id', 'role_id')),
+    'primary key' => array('resource_role_id'),
+  );
+  $schema['gmod_dbsf_software'] = array(
+    'fields' => array(
+      'software_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'uniquename' => array(
+        'type' => 'varchar',
+        'length' => 15,
+        'not null' => TRUE,
+      ),
+      'description' => array(
+        'type' => 'text',
+      ),
+    ),
+    'unique keys' => array('software_uidx' => array('uniquename')),
+    'primary key' => array('software_id'),
+  );
+  $schema['gmod_dbsf_softwareprop'] = array(
+    'fields' => array(
+      'softwareprop_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'software_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'type_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'value' => array(
+        'type' => 'text',
+      ), 'rank' => array(
+        'type' => 'int',
+        'default' => 0,
+      ),
+    ),
+    'unique keys' => array('softwareprop_uidx' => array('software_id', 'type_id', 'rank')),
+    'primary key' => array('softwareprop_id'),
+  );
+  $schema['gmod_dbsf_software_resource'] = array(
+    'fields' => array(
+      'software_resource_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ), 'software_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ), 'resource_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'unique keys' => array('software_resource_uidx' => array('software_id', 'resource_id')),
+    'primary key' => array('software_resource_id'),
+  );
+  return $schema;
+}
+
+/**
+ * Implements hook_requirements
+ */
+function gmod_dbsf_requirements($phase) {
+  $requirements = array();
+  if ($phase == 'install') {
+    $t = get_t();
+    global $db_url;
+    $db='';
+    $db = is_array($db_url) ? $db_url['default'] : $db_url;
+    if (strpos($db, 'pgsql://') === FALSE) {
+      $requirements['pgsql'] = array(
+        'title' => $t('PostGres_server'),
+        'description' => $t('The gmod_dbsf module was not installed: it requires a PostgreSQL database due to integration with GMOD and chado.'),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }
+    else {
+      $requirements['pgsql'] = array(
+        'title' => $t('PostGres_server'),
+        'description' => $t('PostgreSQL database found.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+  }
+  // Test PHP memory_limit
+  if ($phase == 'runtime') {
+    $recommended_memory = '128M';
+    $memory_limit = ini_get('memory_limit');
+    if (isset($memory_limit) && parse_size($memory_limit) < parse_size($recommended_memory)) {
+      $description = t('We recommend you set a memory limit of %memory_limit. Currently, a %memory_minimum_limit PHP memory limit exists.',
+        array('%memory_limit' => $recommended_memory, '%memory_minimum_limit' => $memory_limit)
+      );
+      $description .= ' '. t('Increase the memory limit by editing the %f file and adding %c.',
+        array(
+          '%f' => conf_path() .'/settings.php',
+          '%c' => "ini_set('memory_limit', '128M');",
+        )
+      );
+      $requirements[] = array(
+        'title' => t('GMOD DBSF PHP memory limit'),
+        'value' => $memory_limit,
+        'description' => $description,
+        'severity' => REQUIREMENT_WARNING,
+      );
+    }
+  }
+  else {
+    $requirements[] = array(
+      'title' => t('GMOD DBSF PHP memory limit'),
+      'value' => $memory_limit,
+      'description' => t('You have set at least %mem of memory for PHP.', array('%mem' => $recommended_memory)),
+      'severity' => REQUIREMENT_OK,
+    );
+  }
+  return $requirements;
+}
+

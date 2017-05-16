@@ -1,0 +1,209 @@
+
+
+// The following are ideas; incomplete/untested and unused
+
+/*
+ * Save feature data and analysis into Chado
+ *
+ * superceded
+ * @see gmod_dbsf_chado_gff2chado
+ *
+ * @param $gff_file
+ *
+ * @return unknown_type
+ /
+function gmod_dbsf_chado_gff2feature_annotations($gff_file) {
+  /*Take a gff file, store into the following tables in order
+
+  * - featureprop (gmod_dbsf_populate_prop)
+  * - source goes to dbxref and
+  * - analysis,analysisfeature (gmod_dbsf_chado_store_analysis)
+  /
+
+
+  // Curently it does only annotation
+  // else we need to populate also feature, featureloc (gmod_dbsf_store_feature)
+  // First parse file into an array
+  $array        = array();
+  $parent_array = array();
+  $i            = 0;
+  if (empty($gff_file) || !file_exists($gff_file)) {
+    return;
+  }
+  if ($inhandle = fopen($infile, 'rb')) {
+    while (!feof($inhandle)) {
+      $i++;
+      $line = trim(fgets($inhandle));
+      if (!empty($line)) {
+        //skip pragmas
+        if (strpos($line, '#') === 0) {
+          continue;
+        }
+        $data = explode("\t", $line);
+        //and anything else that is not in gff columns
+        if (empty($data) || count($data) !== 9) {
+          continue;
+        }
+        $temp       = explode(";", $data[9]);
+        $attributes = array();
+        $id         = '';
+        $parent     = '';
+        foreach ($temp as $value) {
+          preg_match('/^([\w_\-])=(.+)/', $value, $matches);
+          if ($matches[1] == 'ID') {
+            $id = $matches[2];
+          }
+          elseif ($matches[1] == 'Parent') {
+            $parent = $matches[2];
+          }
+          else {
+            $attributes[$matches[1]] = $matches[2];
+          }
+        }
+        if (empty($id)) {
+          drupal_set_message(t('GFF3 file $infile had no ID for line %i. Not parsed.', array('%i' => $i)), 'error');
+          continue;
+        }
+        $dbxref_source = gmod_dbsf_get_add_dbxref_withnames('GFF_source', $data[1]);
+
+        $array[$id] = array(
+          'file' => $infile,
+          'type' => $data[2],
+          'parent' => array(
+            'parent_id' => $data[0],
+            'start' => $data[3],
+            'end' => $data[4],
+            'strand' => $data[6],
+            'phase' => $data[7],
+          ),
+          'analysis' => array(
+            //'source_dbxref'=$dbxref_source,
+            'source' => $data[1],
+            'score' => $data[5],
+          ),
+          'attributes' => $attributes,
+        );
+        /*        if (!empty($parent)){
+         //then it will have two parents. another is the ref.
+         // store it after the GFF has been completed
+         gmod_dbsf_link_unlink_features(array(
+         'parent'=>$parent,
+         'feature'=>$id,
+         'start'=>,
+         'end'=>,
+         'strand'=>,
+         'phase'=>,
+         ));
+         }
+         //
+      }
+    }
+    fclose($inhandle);
+  }
+  return $return_array;
+}
+
+/**
+ * Store BLAST EC KEGG OR IPRSCAN data into the analysis table
+ *
+ * @todo consider implementing
+ *
+ * @param $data
+ * Data to parse
+ *
+ * @return boolean
+ * TRUE on success, FALSE on failure
+ /
+function gmod_dbsf_chado_store_analysis($data) {}
+
+
+
+// these are complete, tested but unused
+
+/**
+ * Recreate the chado loader cache (gmod_bulk_load_gff3.pl)
+ *
+ * Uses the gmod_bulk_load_gff3.pl as part of a batch job.
+ * Not used
+ *
+ * @param $db_array
+ * associative array to create dsn: 'dbname', 'host', 'password', 'port', 'user'
+ * @param $context
+ /
+function gmod_dbsf_chado_load_cache($db_array, &$context) {
+  if (empty($db_array)) {
+    return;
+  }
+  $execdir = './'. drupal_get_path('module', 'gmod_dbsf') .'/scripts';
+  // must specify organism explicitly.
+  $gmod_bulk_load = $execdir .'/gmod_bulk_load_gff3-AP.pl';
+  // must specify organism explicitly.
+  //$gmod_bulk_load = $execdir.'/gmod_bulk_load_gff3.pl';
+  if (!file_exists($gmod_bulk_load)) {
+    drupal_set_message(t('Failed to find executable %gmod_bulk_load', array('%gmod_bulk_load' => $gmod_bulk_load)), 'error');
+    return FALSE;
+  }
+  elseif (!is_executable($gmod_bulk_load)) {
+    drupal_set_message(t('Cannot execute the %f program.', array('%f' => $gmod_bulk_load)), 'error');
+    return FALSE;
+  }
+  $gmod_bulk_load = 'nice '. $gmod_bulk_load;
+  $output         = array();
+  $par            = ' --dbname '. $db_array['dbname'] .' --dbuser '. $db_array['user'] .' --dbhost '. $db_array['host'] .' --dbport '. $db_array['port'] ." --dbpass '". $db_array['password'] ."'" . ' --recreate_cache --skip_vacuum  --organism fromdata </dev/null 2>&1';
+  exec($gmod_bulk_load . $par, $output);
+  $context['results']['recreate_cache']['out'] = $output;
+  $context['results']['recreate_cache']['par'] = $par;
+}
+
+/**
+ * Load GFF via BioPerl
+ *
+ * Uses the gmod_bulk_load_gff3.pl as part of a batch job.
+ * Not used
+ *
+ * @param $db_array
+ * associative array to create dsn: 'dbname', 'host', 'password', 'port', 'user'
+ * @param $id
+ * Unique array for &context['results']
+ * @param $data
+ * associative array to build command line: 'org_abbr'  is the organism abbreviation
+ * 'filename', 'refname' the friendly identifier for reporting any error.
+ * @param $context
+ * part of the batch API
+ /
+function gmod_dbsf_chado_load_gff($db_array, $id, $data, &$context) {
+  if (empty($db_array) || empty($data)) {
+    return;
+  }
+  $execdir = './'. drupal_get_path('module', 'gmod_dbsf') .'/scripts';
+  // must specify organism explicitly.
+  $gmod_bulk_load = $execdir .'/gmod_bulk_load_gff3-AP.pl';
+  // must specify organism explicitly.
+  //$gmod_bulk_load = $execdir.'/gmod_bulk_load_gff3.pl';
+  if (!file_exists($gmod_bulk_load)) {
+    drupal_set_message(t('Failed to find executable %gmod_bulk_load', array('%gmod_bulk_load' => $gmod_bulk_load)), 'error');
+    return FALSE;
+  }
+  elseif (!is_executable($gmod_bulk_load)) {
+    drupal_set_message(t('Cannot execute the %f program.', array('%f' => $gmod_bulk_load)), 'error');
+    return FALSE;
+  }
+  $gmod_bulk_load = 'nice '. $gmod_bulk_load;
+  $output         = array();
+  $fname          = $data['ref_name'];
+  $infile         = $data['filename'];
+  $org            = $data['org_abbr'];
+  if (empty($org) || empty($infile) || !file_exists($infile)) {
+    drupal_set_message(t('Sorry, cannot proceed to load GFF for %fname. Either the file (%infile) or organism (%org) is missing.',
+        array('%fname' => $fname, '%infile' => $infile, '%org' => $org)
+      ), 'error');
+    return FALSE;
+  }
+  $par = ' --dbname '. $db_array['dbname'] .' --dbuser '. $db_array['user'] .' --dbhost '. $db_array['host'] .' --dbport '. $db_array['port'] ." --dbpass '". $db_array['password'] ."' --skip_vacuum";
+  $par .= " --gfffile $infile --organism $org --analysis --noexon 2>&1";
+  exec($gmod_bulk_load . $par, $output);
+  $context['results'][$id]['out'] = $output;
+  $context['results'][$id]['par'] = $par;
+}
+
+*/

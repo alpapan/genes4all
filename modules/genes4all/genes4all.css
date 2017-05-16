@@ -1,0 +1,19 @@
+/* $Id$ */
+
+/**
+* @file
+* CSS for genes4all module
+*
+*/
+
+table.genes4all_explore-library-table td {
+    font-family: tahoma, arial, helvetica;
+    font-size: 8pt;
+    padding:4px;
+}
+table.genes4all-highpadded-table td {
+    font-family: tahoma, arial, helvetica;
+    font-size: 12pt;
+    padding:8px;
+  
+}

@@ -1,0 +1,397 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the genes4all_curate module
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+function genes4all_curate_install() {
+  drupal_install_schema('genes4all_curate');
+  //Have to alter the table because the following features are not offered in D6
+  db_query('ALTER table {genes4all_approval_queue} add date_added timestamp with time zone default now()');
+  db_query('ALTER table {genes4all_approval_queue} add date_curated timestamp with time zone');
+  db_query('ALTER TABLE {genes4all_submitted_annotation} ADD date_added timestamp with time zone DEFAULT now()');
+  db_query('ALTER TABLE {genes4all_submitted_dbxref} ADD date_added timestamp with time zone DEFAULT now()');
+  genes4all_curate_foreign_keys();
+  genes4all_empty_caches();
+  genes4all_curate_install_cvs();
+}
+
+/**
+ * Implementats hook_requirements
+ */
+function genes4all_curate_requirements($phase) {
+  $requirements = array();
+  if ($phase == 'install') {
+    $t = get_t();
+    global $db_url;
+    if (!is_array($db_url) || empty($db_url['chado']) || empty($db_url['chado_edit'])) {
+      $requirements['chado_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('Chado database not found: The genes4all_curate module was not installed.'.
+          ' Edit the %f file to have the <em>chado</em> and <em>chado_edit</em> databases defined within the $db_url variables.',
+      array('%f' => conf_path() .'/settings.php',
+      )
+      ),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }
+    else {
+      $requirements['chado_found'] = array(
+        'title' => $t('Chado database'),
+        'description' => $t('Chado database found.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+    if (strpos($db_url['default'],'pgsql')===FALSE ) {
+      $requirements['drupal_psql'] = array(
+        'title' => $t('Drupal PSQL database'),
+        'description' => $t('Drupal database is not of PostgreSQL flavour. The genes4all_curate module utilizes foreign keys and requires it (it is also more secure, stable and generally better featured). Module has not been installed.'),
+        'severity' => REQUIREMENT_ERROR,
+      );
+    }
+    else {
+      $requirements['drupal_psql'] = array(
+        'title' => $t('Drupal PSQL database'),
+        'description' => $t('Drupal database is of PostgreSQL flavour. Good.'),
+        'severity' => REQUIREMENT_OK,
+      );
+    }
+  }
+  return $requirements;
+}
+
+function genes4all_curate_uninstall_cvs(){
+  //I don't know if it is a good idea to remove the CVs when this module is uninstalled, so
+  // this function is not called by default
+  gmod_dbsf_delete_cv('Organ');
+  gmod_dbsf_delete_cv('tissue_type');
+  gmod_dbsf_delete_cv('dev_stage');
+  gmod_dbsf_delete_cv('Site_1');
+  gmod_dbsf_delete_cv('Site_2');
+  gmod_dbsf_delete_cv('Vector');
+  gmod_dbsf_delete_cv('cell_line');
+  gmod_dbsf_delete_cv('cell_type');
+  gmod_dbsf_delete_cv('country');
+  gmod_dbsf_delete_cv('cultivar');
+  gmod_dbsf_delete_cv('genotype');
+  gmod_dbsf_delete_cv('isolate');
+  gmod_dbsf_delete_cv('lab_host');
+  gmod_dbsf_delete_cv('map');
+  gmod_dbsf_delete_cv('sequencing_technology');
+  gmod_dbsf_delete_cv('sex');
+  gmod_dbsf_delete_cv('strain');
+  gmod_dbsf_delete_cv('sub_species');
+
+}
+
+function genes4all_curate_install_cvs() {
+  gmod_dbsf_add_cv('curator_actions', array('submitted by', 'approved by', 'edited by'));
+  gmod_dbsf_get_add_resource('Dataset for auto-annotation', NULL, 'ADD');
+
+  //some small gifs for approval queue
+  $dirpath = file_create_path() .'/genes4all_curate';
+  file_check_directory($dirpath, FILE_CREATE_DIRECTORY);
+  if (!file_exists($dirpath .'/index.html')) {
+    touch($dirpath .'/index.html');
+  }
+  $img_status_done  = $dirpath .'/status_done.gif';
+  $img_status_wait  = $dirpath .'/status_wait.gif';
+  $img_status_error = $dirpath .'/status_error.gif';
+  if (!file_exists($img_status_done)) {
+    $status_done = imagecreatetruecolor(30, 10);
+    $green = imagecolorallocate($status_done, 0, 250, 0);
+    imagefilltoborder($status_done, 0, 0, $green, $green);
+    imagegif($status_done, $img_status_done);
+    imagedestroy($status_done);
+  }
+  if (!file_exists($img_status_wait)) {
+    $status_wait = imagecreatetruecolor(30, 10);
+    $red = imagecolorallocate($status_wait, 255, 0, 0);
+    imagefilltoborder($status_wait, 0, 0, $red, $red);
+    imagegif($status_wait, $img_status_wait);
+    imagedestroy($status_wait);
+  }
+  if (!file_exists($img_status_error)) {
+    $status_error = imagecreatetruecolor(30, 10);
+    $red = imagecolorallocate($status_error, 255, 0, 0);
+    imagefilltoborder($status_error, 0, 0, 0, $red);
+    imagegif($status_error, $img_status_error);
+    imagedestroy($status_error);
+  }
+
+  $current_custom_cv = gmod_dbsf_get_add_var('genes4all_custom_cv_curate');
+  $current_custom_db = gmod_dbsf_get_add_var('genes4all_custom_db_curate');
+
+  $script_path = drupal_get_path('module', 'gmod_dbsf').'/scripts/';
+  $operations = array();
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv','free_curation_terms', array('Ribosomal Protein')));
+  if (!in_array('InterPro',(array)$current_custom_db)){
+    $operations[] = array('genes4all_curate_install_db_upload_batch', array('InterPro',array('description'=>'InterPro','url'=>'http://www.ebi.ac.uk/interpro/','url_prefix'=>'http://www.ebi.ac.uk/interpro/DisplayIproEntry?ac='), $script_path.'ipr_dbxref_data_full.csv'));
+  }if (!in_array('EC',(array)$current_custom_cv)){
+    $operations[] = array('genes4all_curate_install_cv_upload_batch', array('EC','Enzyme Classification', $script_path.'EC_cvterms.csv'));
+  }if (!in_array('KEGG_PATHWAY',(array)$current_custom_cv)){
+    $operations[] = array('genes4all_curate_install_cv_upload_batch', array('KEGG_PATHWAY', 'Kyoto Encyclopedia of Genes and Genomes', $script_path.'KEGG_cvterms.csv'));
+  }
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv','curator_actions', array('submitted by', 'approved by', 'edited by')));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv','curator_suggestions', array('DELETE', 'VERIFY', 'OBSOLETE')));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','Organ', 'Organ'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','tissue_type', 'Tissue type'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','dev_stage', 'Developmental stage'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','Site_1', 'Restriction enzyme used at 5 prime end'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','Site_2', 'Restriction enzyme used at 3 prime end'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','Vector', 'Cloning vector'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','cell_line', 'Cell line'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','cell_type', 'Type of cells'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','country', 'Country of origin'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','cultivar', 'Cultivar name'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','genotype', 'Genotype'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','isolate', 'Isolate'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','lab_host', 'Laboratory host'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','map', 'Cytogenetic map location'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','sequencing_technology', 'Sequencing technology'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','sex', 'Sex of specimens'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','strain', 'Strain of specimens'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','sub_species', 'Sub species'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv_only','Library types', 'Types of library'));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv','Library types', array('cDNA','BAC','fosmid','cosmid','Illumina_PE','Illumina_MP_3kb','Illumina_MP_5kb','Illumina_MP_8kb','454_3kb','454_5kb','454_8kb')));
+  $operations[] = array('gmod_dbsf_db_execute',array('chado_edit','gmod_dbsf_add_cv','NCBI_TAXONOMY_RANKS', array('no rank','superkingdom','kingdom','phylum','superclass','class','subclass','infraclass','order','family','genus','species','subspecies')));
+  $batch = array(
+         'title' => t('Adding new CVs to Chado...'),
+          'operations' => $operations,
+          'init_message' => t('Starting Chado connections...'),
+          'progress_message' => t('@remaining CVs remaining...'),
+          'error_message' => t('The process encountered an error.'),
+          'finished' => 'genes4all_curate_install_batch_finished',
+  		  'file' => drupal_get_path('module', 'genes4all_curate') .'/genes4all_curate.install',
+  );
+  batch_set($batch);
+  //DO NOT USE THIS OR IT WILl FAIL batch_process();
+}
+
+function genes4all_curate_foreign_keys() {
+  $keys       = array();
+  $condition  = 'ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  $condition2 = 'ON DELETE SET NULL ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  $condition3 = 'ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED';
+  //
+  $keys[] = "ALTER TABLE {genes4all_approval_queue} ADD CONSTRAINT submitter_name_fkey FOREIGN KEY (submitter_name) REFERENCES {users}(name) $condition3";
+  $keys[] = "ALTER TABLE {genes4all_submitted_annotation} ADD CONSTRAINT submitter_name_fkey FOREIGN KEY (submitter_name) REFERENCES {users}(name) $condition3";
+  $keys[] = "ALTER TABLE {genes4all_submitted_dbxref} ADD CONSTRAINT submitter_name_fkey FOREIGN KEY (submitter_name) REFERENCES {users}(name) $condition3";
+  foreach ($keys as $key_sql) {
+    db_query($key_sql);
+  }
+}
+
+function genes4all_curate_schema() {
+  //for new features:
+  $schema=array();
+  $schema['genes4all_approval_queue'] = array(
+    'fields' => array(
+      'approval_queue_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+      'uniquename' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'submitter_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'submission_id' => array(
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+  ),
+       'annotation_id' => array(
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+  ),
+  //automatic annotation:
+      'annotated' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+  ),
+  //head curator approved:
+      'approved' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+  ),
+  ),
+     'indexes' => array(
+      'approved' => array('approved'),
+      'annotated' => array('annotated'),
+      'submitter_name'=>array('submitter_name'),
+  ),
+    'unique keys' => array(
+      'uidx1' => array('uniquename'),
+  ),
+    'primary key' => array('approval_queue_id'),
+  );
+  // there are two IDs: the one relating to the feature (annotation_id)
+  // and submission IDs associated with the user's submission. The user has access only to the latter.
+
+  //for feature curation:
+  $schema['genes4all_submitted_annotation'] = array(
+    'fields' => array(
+      'submitted_annotation_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+  //feature, library organism etc
+      'chado_reference_type' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'chado_reference_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+  ),
+      'chado_cv_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'chado_cvterm_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'submitter_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'disagree' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+  ),
+  ),
+    'indexes' => array(
+      'chado_reference' => array('chado_reference_type','chado_reference_id'),
+      'submitter_name'=>array('submitter_name'),
+  ),
+    'unique keys' => array(
+      'uidx1' => array('chado_reference_type','chado_reference_id','submitter_name','chado_cv_name','chado_cvterm_name'),
+  ),
+    'primary key' => array('submitted_annotation_id'),
+  );
+  $schema['genes4all_submitted_dbxref'] = array(
+    'fields' => array(
+      'submitted_dbxref_id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+  ),
+  //feature, library organism etc
+      'chado_reference_type' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'chado_reference_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+  ),
+      'chado_db_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'chado_dbxref_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'submitter_name' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+  ),
+      'disagree' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+  ),
+  ),
+    'indexes' => array(
+      'chado_reference' => array('chado_reference_type','chado_reference_id'),
+      'submitter_name'=>array('submitter_name'),
+  ),
+    'unique keys' => array(
+      'uidx1' => array('chado_reference_type','chado_reference_id','submitter_name','chado_db_name','chado_dbxref_name'),
+  ),
+    'primary key' => array('submitted_dbxref_id'),
+  );
+
+  return $schema;
+}
+
+function genes4all_curate_uninstall() {
+  //Custom uninstall to allow for foreign keys
+  $tables = array('{genes4all_approval_queue}','{genes4all_submitted_annotation}');
+  $table_str = implode(',', $tables);
+  db_query('DROP TABLE ' . $table_str .' CASCADE');
+  gmod_dbsf_delete_cv('curator_actions');
+  // not called by default:
+  //gmod_dbsf_db_execute('chado_edit','genes4all_curate_uninstall_cvs');
+  genes4all_empty_caches();
+}
+
+function genes4all_curate_enable() {
+  genes4all_empty_caches();
+}
+
+function genes4all_curate_disable() {
+  genes4all_empty_caches();
+}
+
+function genes4all_curate_install_db_upload_batch($db,$dbdef,$filename,&$context){
+  if (empty($filename)){return;}
+  $return = gmod_dbsf_db_execute('chado_edit','gmod_dbsf_chado_load_dbxref_from_file',$db,$dbdef,$filename,',','"',TRUE);
+  if (!empty($return)){
+    $context['results']['db_id'][]=$return;
+    $context['results']['db'][]=$db;
+    $context['results']['dbdef'][]=$dbdef;
+  }
+}
+
+function genes4all_curate_install_cv_upload_batch($cv,$cvdef,$filename,&$context){
+  if (empty($filename)){return;}
+  $return = gmod_dbsf_db_execute('chado_edit','gmod_dbsf_chado_load_ontology_from_file',$cv,$cvdef,$filename,',','"');
+  if (!empty($return)){
+    $context['results']['cv_id'][]=$return;
+    $context['results']['cv'][]=$cv;
+    $context['results']['cvdef'][]=$cvdef;
+  }
+}
+
+function genes4all_curate_install_batch_finished($success, $results, $operations){
+  $message = '';
+  if (!empty($success)) {
+    if (!empty($results)){
+      // only if interpro GO, ec kegg have been added
+      foreach ($results['cv'] as $cv){
+        drupal_set_message(t('CV %t has been uploaded from a file',array('%t'=>$cv)),'warning');
+      }foreach ($results['db'] as $db){
+        drupal_set_message(t('DB %t has been uploaded from a file',array('%t'=>$db)),'warning');
+      }
+      $current_custom_cv = gmod_dbsf_get_add_var('genes4all_custom_cv_curate');
+      $current_custom_db = gmod_dbsf_get_add_var('genes4all_custom_db_curate');
+      if (!empty($current_custom_cv)){
+        gmod_dbsf_get_add_var('genes4all_custom_cv_curate',array_unique(array_merge((array)$current_custom_cv,$results['cv'])),FALSE);
+      }else{
+        gmod_dbsf_get_add_var('genes4all_custom_cv_curate',$results['cv'],FALSE);
+      }if (!empty($current_custom_db)){
+        gmod_dbsf_get_add_var('genes4all_custom_db_curate',array_unique(array_merge((array)$current_custom_db,$results['db'])),FALSE);
+      }else{
+        gmod_dbsf_get_add_var('genes4all_custom_db_curate',$results['db'],FALSE);
+      }
+    }
+    drupal_set_message(t('Some new CVs have been added to your Chado database.'), 'warning');
+  }
+  else {
+    $error_operation = reset($operations);
+    drupal_set_message(t('An error occurred while processing your request. Please '. l('contact', 'contact') .' the administrator.'),'error');
+  }
+}

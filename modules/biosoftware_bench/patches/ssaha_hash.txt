@@ -1,0 +1,21 @@
+SSAHA2 makes and saves hash tables with preconfigured kmer counts.
+In order to use it for DBSF you must produce the hash tables first
+as per the documentation in the dbsf_ssaha2.inc file. Please follow 
+the instructions there which I'm going to copy paste here again:
+
+ * A SSAHA dataset must have the following to be allowed
+ * 1) The actual raw fasta file (eg dmel_genome_5.16 for these instructions)
+ * 2) formatted with index_fasta.pl (in scripts; a BioPerl script)
+ *    e.g. index_fasta.pl -d dmel_genome_5.16
+ * 3) hash table build with the ssaha2Build -rtype abi as -save dmel_genome_5.16_sanger
+ * 4) hash table build with the ssaha2Build -rtype 454 as -save dmel_genome_5.16_454
+ * 5) hash table build with the ssaha2Build -rtype solexa as -save dmel_genome_5.16_solexa
+ * 6) ALL the *.head files produced by ssaha2Build MUST be compressed; use gzip -1 as it is fast.
+ * so that for a dataset 'dmel' we have the files
+ * - dmel, dmel.index
+ * - dmel_sanger.base,dmel_sanger.body,dmel_sanger.head.gz,dmel_sanger.name,dmel_sanger.size
+ * - dmel_454.base,dmel_454.body,dmel_454.head.gz,dmel_454.name,dmel_454.size,
+ * - dmel_solexa.basedmel_solexa.body,dmel_solexa.head.gz,dmel_solexa.name,dmel_solexa.size
+ * Symbolic links are also allowed but must be set in your Apache configuration file as allowed ("follow symlinks" etc)
+ * NB The run-user of dbsf_daemon.pl must have permission to write in the directory where the .head.gz file resides
+ 

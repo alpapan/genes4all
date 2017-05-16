@@ -1,0 +1,16 @@
+// $Id:$
+
+CHANGELOG
+
+genes4all 6.x-0.9 (dev)
+=======================
+
+  * First public release as a beta
+
+  NB: Please visit update.php to apply pending updates.
+
+gmod_dbsf 6.x-1.0
+==================
+ * Rebranded to gmod_dbsf. Genes4all remains the module name for the visualization modules 
+ * As a result the schema names have changed and must be renamed /manually/: all genes4all_ tables must be renamed
+ with the gmod_dbsf_ prefix instead of genes4all_ 

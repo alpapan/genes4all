@@ -1,0 +1,18 @@
+;$Id$
+name = "Genes4All Exploration Facility"
+description = "Allows you to explore Genes4All data"
+core = 6.x
+php = 5.1
+package = Genes4All
+dependencies[] = gmod_dbsf_chado
+dependencies[] = gmod_dbsf
+dependencies[] = genes4all
+dependencies[] = biosoftware_bench
+dependencies[] = hovertip
+
+; Information added by drupal.org packaging script on 2013-09-30
+version = "6.x-2.0+6-dev"
+core = "6.x"
+project = "genes4all"
+datestamp = "1380580626"
+

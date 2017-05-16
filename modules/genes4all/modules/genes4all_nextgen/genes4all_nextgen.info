@@ -1,0 +1,16 @@
+;$Id$
+name = "Genes4All Next Generation data"
+description = "Supports Illumina data and SAM/BAM formats"
+core = 6.x
+php = 5.1
+package = Genes4All
+dependencies[] = genes4all
+dependencies[] = gmod_dbsf
+dependencies[] = gmod_dbsf_chado
+
+; Information added by drupal.org packaging script on 2013-09-30
+version = "6.x-2.0+6-dev"
+core = "6.x"
+project = "genes4all"
+datestamp = "1380580626"
+

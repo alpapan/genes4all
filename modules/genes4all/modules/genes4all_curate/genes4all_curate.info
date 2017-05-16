@@ -1,0 +1,17 @@
+;$Id$
+name = "Genes4All Curation Centre"
+description = "Curate Genes4All data; warning: new CVs are loaded from CSV files which can make installation slow."
+core = 6.x
+php = 5.1
+package = Genes4All
+dependencies[] = genes4all
+dependencies[] = biosoftware_bench
+dependencies[] = hovertip
+dependencies[] = tabs
+
+; Information added by drupal.org packaging script on 2013-09-30
+version = "6.x-2.0+6-dev"
+core = "6.x"
+project = "genes4all"
+datestamp = "1380580626"
+

@@ -1,0 +1,48 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install the genes4all_download module
+ * It doesn't really do anything, yet.
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+
+/**
+ * Custom implementation of the hook_install ().
+ *
+ * Uses db_query to change type to boolean (unsupported in Drupal 6)
+ * Adds some CVs
+ * Looks for include files to include plugins.
+ */
+function genes4all_download_install() {
+  genes4all_download_install_cvs();
+}
+
+function genes4all_download_install_cvs() {
+  $dirpath = file_create_path() .'/downloads';
+  file_check_directory($dirpath, FILE_CREATE_DIRECTORY);
+  // prevent indexing via www
+  if (!file_exists($dirpath .'/index.html')) {
+    touch($dirpath .'/index.html');
+  }
+}
+
+/**
+ * Implement hook_uninstall().
+ */
+function genes4all_download_uninstall() {}
+
+/**
+ * Implement hook_enable().
+ */
+function genes4all_download_enable() {
+  genes4all_download_install_cvs();
+}
+
+/**
+ * Implement hook_disable().
+ */
+function genes4all_download_disable() {}
+

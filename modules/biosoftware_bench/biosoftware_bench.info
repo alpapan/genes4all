@@ -1,0 +1,15 @@
+;$Id$
+name = "Bioinformatics Software Bench"
+description = "Setup, manage and use an innovative software server"
+core = 6.x
+php = 5.1
+package = BioSoftware Bench
+dependencies[] = gmod_dbsf
+dependencies[] = tabs
+
+; Information added by drupal.org packaging script on 2012-06-06
+version = "6.x-2.3"
+core = "6.x"
+project = "biosoftware_bench"
+datestamp = "1338964574"
+

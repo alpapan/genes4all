@@ -1,0 +1,33 @@
+Your annot8r databases must allow SELECT for the user you setup in the administration form
+So if you have given the user to be an unpriviliged www-db then you need to go to each psql 
+database and give SELECT permissions in every table. Here is a function that can do that for
+ the connected database.
+
+
+a8r_gobase=# 
+CREATE LANGUAGE plpgsql ;
+
+a8r_gobase=#  
+CREATE OR REPLACE FUNCTION pg_grant(TEXT, TEXT)
+RETURNS integer AS '
+DECLARE obj record;
+num integer;
+BEGIN
+num:=0;
+FOR obj IN SELECT relname FROM pg_class c
+JOIN pg_namespace ns ON (c.relnamespace = ns.oid) WHERE
+relkind in (''r'',''v'',''S'') AND
+nspname = ''public'' AND
+relname LIKE ''%''
+LOOP
+EXECUTE ''GRANT '' || $2 || '' ON '' || obj.relname || '' TO '' || $1;
+num := num + 1;
+END LOOP;
+RETURN num;
+END;
+' LANGUAGE plpgsql ;
+
+a8r_gobase=#  
+select pg_grant('"www-db"','select');
+
+Just do this in every a8r database

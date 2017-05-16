@@ -1,0 +1,32 @@
+/* $Id$ */
+
+/**
+* @file
+* CSS for gmod_dbsf module
+*
+*/
+
+table.sortable thead th {
+    background-color:#eee;
+    color:#666666;
+    font-weight: bold;
+    cursor: default;
+}
+
+table.padded-table td { 
+  padding:10px; 
+}
+
+.italics {
+  font-style: italic;
+}
+
+table.vertical td { 
+  padding:3px; 
+  border-right:1px dashed #AAA;
+}
+
+.ui-tabs-nav li.ui-tabs-selected a,.ui-tabs-nav li.ui-tabs-active a, .ui-tabs-nav li.ui-tabs-selected a:hover, .ui-tabs-nav li.ui-tabs-active a:hover {
+background: #8ab9ff;
+color: #000000;
+}

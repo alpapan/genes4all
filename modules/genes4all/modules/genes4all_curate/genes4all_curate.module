@@ -1,0 +1,982 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Module for annotating a genes4all database
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ *
+ */
+function genes4all_curate_init() {
+  drupal_add_css(drupal_get_path('module', 'gmod_dbsf') .'/gmod_dbsf.css', 'module');
+}
+
+/**
+ * Implementation of hook_menu
+ */
+function genes4all_curate_menu() {
+  $includes_path = drupal_get_path('module', 'genes4all') .'/includes';
+  $items = array();
+
+  $items['admin/settings/genes4all_curate'] = array(
+    'file' => 'includes/genes4all_curate_admin.inc',
+    'title' => 'Genes4all Curation Centre',
+    'page callback' => 'genes4all_curate_admin_page',
+    'access arguments' => array('Administrate genes4all_curate'),
+    'description' => 'Configure the genes4all_curate module',
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['admin/genes4all_curate/access'] = array(
+    'file' => 'includes/genes4all_curate_admin.inc',
+    'title' => 'Control dataset access',
+    'page arguments' => array(3),
+    'page callback' => 'genes4all_curate_access_restrictions_page',
+    'description' => 'Decide if any datasets, libraries or organisms have access limited to particular users.',
+    'access arguments' => array('Administrate genes4all_curate'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['genes4all/curate/features'] = array(
+    'file' => 'includes/genes4all_curate_feature.inc',
+    'title' => 'Approve new features',
+    'page callback' => 'genes4all_curate_approve_features_page',
+    'page arguments' => array(3),
+    'access arguments' => array('Approve new features'),
+    'description' => 'View the new feature queue, and approve features for inclusion into Chado',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/cv/new'] = array(
+    'title' => 'New CV',
+    'page callback' => 'genes4all_curate_new_cv_upload_page',
+    'access arguments' => array('Upload CV'),
+    'description' => 'Upload a new Controlled Vocabulary (CV)',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/db/new'] = array(
+    'title' => 'New DB',
+    'page callback' => 'genes4all_curate_new_db_upload_page',
+    'access arguments' => array('Upload DB'),
+    'description' => 'Upload a new external database for cross-references',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/feature/view'] = array(
+    'file' => 'includes/genes4all_curate_feature.inc',
+    'title' => 'Approve new features',
+    'page callback' => 'genes4all_curate_view_feature_page',
+    'page arguments' => array(4),
+    'access arguments' => array('Approve new features'),
+    'description' => 'View features proposed for inclusion into Chado',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/select'] = array(
+    'title' => 'Curation main hub',
+    'page callback' => 'genes4all_curate_page_select',
+    'access arguments' => array('access content'),
+    'description' => 'Curation and annotation',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['genes4all/feature/curate'] = array(
+    'file' => 'includes/genes4all_curate_feature.inc',
+    'title' => 'Feature curation',
+    'page callback' => 'genes4all_curate_page_feature_curate',
+    'page arguments' => array(3),
+    'access arguments' => array('Curate permitted features'),
+    'description' => 'Feature annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/library/curate'] = array(
+    'file' => 'includes/genes4all_curate_library.inc',
+    'title' => 'Library annotation',
+    'page callback' => 'genes4all_curate_page_library_curate',
+    'access arguments' => array('Curate permitted libraries'),
+    'description' => 'Library annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/library/find'] = array(
+    'file' => 'includes/genes4all_curate_library.inc',
+    'title' => 'Find a library',
+    'page callback' => 'genes4all_curate_view_library_page',
+    'access arguments' => array('Search for libraries'),
+    'description' => 'Library annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/library/result'] = array(
+    'file' => 'includes/genes4all_curate_library.inc',
+    'title' => 'Find a library',
+    'page callback' => 'genes4all_curate_page_library_find_results',
+    'page arguments' => array(3),
+    'access arguments' => array('Search for libraries'),
+    'description' => 'Library search results',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/organism/curate'] = array(
+    'file' => 'includes/genes4all_curate_organism.inc',
+    'title' => 'Edit organism',
+    'page callback' => 'genes4all_curate_page_organism_curate',
+    'page arguments' => array(3),
+    'access arguments' => array('Curate permitted organisms'),
+    'description' => 'Organism annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/organism/find'] = array(
+    'file' => 'includes/genes4all_curate_organism.inc',
+    'title' => 'Edit organism',
+    'page callback' => 'genes4all_curate_view_organism_page',
+    'access arguments' => array('Curate permitted organisms'),
+    'description' => 'Organism annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/feature/add'] = array(
+    'file' => 'includes/genes4all_curate_feature.inc',
+    'title' => 'Submit a new sequence-based feature',
+    'page callback' => 'genes4all_curate_page_feature_add',
+    'access arguments' => array('Add new features'),
+    'description' => 'Feature annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/feature/added'] = array(
+    'file' => 'includes/genes4all_curate_feature.inc',
+    'title' => 'New feature',
+    'page callback' => 'genes4all_curate_page_feature_added',
+    'access arguments' => array('Add new features'),
+    'description' => 'Feature annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/library/add'] = array(
+    'file' => 'includes/genes4all_curate_library.inc',
+    'title' => 'New Library',
+    'page callback' => 'genes4all_curate_page_library_add',
+    'access arguments' => array('Add new libraries'),
+    'description' => 'Library annotation',
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/organism/add'] = array(
+    'file' => 'includes/genes4all_curate_organism.inc',
+    'title' => 'New organism',
+    'page callback' => 'genes4all_curate_page_organism_add',
+    'access arguments' => array('Add new organisms'),
+    'description' => 'Library annotation',
+    'type' => MENU_CALLBACK,
+  );
+  /////////////////////////////////////////////////////
+  // Ajax callbacks:
+  /////////////////////////////////////////////////////
+  $items['genes4all/feature/autocomplete'] = array(
+    'title' => 'Feature autocomplete',
+    'page callback' => 'genes4all_feature_autocomplete',
+    'access arguments' => array('content'),
+    'type' => MENU_CALLBACK,
+    'file path' => $includes_path,
+    'file' => 'genes4all_autocomplete.inc',
+  );
+  /*  $items['genes4all/curate/feature/tabajax'] = array(
+   'title' => 'Feature ontology assign tab',
+   'page arguments' => array(4),
+   'page callback' => 'genes4all_curate_ajax_feature_curate_tab',
+   'access arguments' => array('access content'),
+   'type' => MENU_CALLBACK,
+   );
+   */
+  $items['genes4all/curate/library_dbname/autocomplete'] = array(
+    'file path' => $includes_path,
+    'file' => 'genes4all_autocomplete.inc',
+    'title' => 'Library dbname autocomplete',
+    'page callback' => 'genes4all_curate_autocomplete_library_dbname',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/library_cvterm/autocomplete'] = array(
+    'file path' => $includes_path,
+    'file' => 'genes4all_autocomplete.inc',
+    'title' => 'Library cvterms autocomplete',
+    'page callback' => 'genes4all_curate_autocomplete_library_cvterm',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/free_term/autocomplete'] = array(
+    'file path' => $includes_path,
+    'file' => 'genes4all_autocomplete.inc',
+    'title' => 'free term autocomplete',
+    'page callback' => 'genes4all_curate_autocomplete_free_term',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/genus/autocomplete'] = array(
+    'file path' => $includes_path,
+    'file' => 'genes4all_autocomplete.inc',
+    'title' => 'Genus autocomplete',
+    'page callback' => 'genes4all_curate_autocomplete_genus',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['genes4all/curate/species/autocomplete'] = array(
+    'file path' => $includes_path,
+    'file' => 'genes4all_autocomplete.inc',
+    'title' => 'Species autocomplete',
+    'page callback' => 'genes4all_curate_autocomplete_species',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function genes4all_curate_perm() {
+  return array('Search for libraries', 'Administrate genes4all_curate', 'Approve new features', 'Upload CV','Curate permitted libraries', 'Curate permitted organisms', 'Curate permitted features', 'Add new libraries', 'Add new organisms', 'Add new features');
+}
+
+function genes4all_curate_page_select() {
+  $return = 'The curation module has been developed in order to facilitate Chado administrators but also to allow selected ' . 'members of the public to submit their own annotations. If you have the authorization, choose an action:<ul>';
+  $return .= l('<li>Store new organism data</li>', 'genes4all/organism/add', array('html' => TRUE, 'attributes' => array('target' => '_blank')));
+  $return .= l('<li>Store new library data</li>', 'genes4all/library/add', array('html' => TRUE, 'attributes' => array('target' => '_blank')));
+  $return .= l('<li>Submit a new feature (e.g. mRNA)</li>', 'genes4all/feature/add', array('html' => TRUE, 'attributes' => array('target' => '_blank')));
+  if (module_exists('genes4all_nextgen')){
+    $return .= l('<li>Store Next Generation data (e.g. RNA-seq) using a SAM/BAM file</li>', 'admin/settings/genes4all_nextgen', array('html' => TRUE, 'attributes' => array('target' => '_blank')));
+  }
+  $return .= l('<li>Delete or upload a new Controlled Vocabulary</li>', 'genes4all/curate/cv/new', array('html' => TRUE, 'attributes' => array('target' => '_blank')));
+  $return .= l('<li>Delete or upload a new external database to use for cross-referencing</li>', 'genes4all/curate/db/new', array('html' => TRUE, 'attributes' => array('target' => '_blank')));
+  $return .= '</ul>If you wish to curate a specific feature, go to the feature using '.l('the form','genes4all/search/accession').' and click the "Curate this" button.';
+
+  return $return;
+}
+
+/**
+ * Produde a $form API variable for evidence codes
+ *
+ * This is used every time we ask the user to provide a CV term for an annotation
+ * they wish to store.
+ *
+ * @param $limit
+ * a string limit to apply when fetching the evidence codes. this is a partial
+ * case insensitive search using stripos. $limit is the codes not returned
+ * @param $reverse
+ * Default is FALSE; if TRUE then limit is the evidence codes to fetch
+ * @param $required
+ * if set to TRUE (default) then the form does not have a "None" option.
+ * Otherwise it does
+ *
+ * @return a variable according to the Drupal form API.
+ */
+function genes4all_curation_cv_evidence($limit = NULL, $reverse = FALSE, $required = TRUE) {
+  gmod_dbsf_db_execute('chado');
+  $cvterms = gmod_dbsf_get_add_cv_withnames('Evidence Codes', NULL, 'BOTH');
+  gmod_dbsf_db_execute();
+  $cvterm_options;
+  foreach ($cvterms as $key => $value) {
+    $value = strtr(ucfirst($value), '_', ' ');
+    if (empty($reverse) && !empty($limit)) {
+      if (stripos($value, $limit) !== FALSE) {
+        $cvterm_options[$key] = $value;
+      }
+    }
+    elseif (!empty($limit)) {
+      if (stripos($value, $limit) === FALSE) {
+        $cvterm_options[$key] = $value;
+      }
+    }
+    else {
+      $cvterm_options[$key] = $value;
+    }
+  }
+  unset($cvterms);
+  if ($required === FALSE) {
+    $cvterm_options = array(0 => 'None') + $cvterm_options;
+  }
+  $form = array(
+    '#type' => 'select',
+    '#size' => 1,
+    '#title' => 'Evidence for CV term assignment',
+    '#description' => t('Please choose one term which best describes the reason you are submitting this annotation. ' . 'Most times, only a fraction of the options will be sensible.'
+    ),
+    '#required' => $required,
+    '#options' => $cvterm_options,
+    '#weight' => 10,
+    );
+    return $form;
+}
+
+function genes4all_curation_get_all_curation_actions($reference_type=NULL,$reference_id=NULL){
+  if (empty($reference_type)){return;}
+  $return_array = array();
+  $select_sql = 'SELECT DISTINCT chado_cv_name,chado_cvterm_name '
+  .' FROM {genes4all_submitted_annotation} WHERE '
+  ."chado_reference_type='$reference_type' ";
+  if (!empty($reference_id)){
+    if (is_array($reference_id)){
+      $reference_id = gmod_dbsf_array2csv($reference_id,TRUE);
+    }
+    $select_sql .= " AND chado_reference_id IN ($reference_id) ";
+  }
+  $res = db_query($select_sql);
+  while ($dbdata=db_fetch_array($res)){
+    $data = gmod_dbsf_db_execute('chado','gmod_dbsf_get_cvterm_details',$dbdata['chado_cvterm_name'],$dbdata['chado_cv_name']);
+    if(empty($data)){continue;}
+    $return_array['cvterm'][$data['cv_name']][$data['cvterm_id']]=$data['cvterm_name'];
+    $return_array['cvterm_def'][$data['cv_name']][$data['cvterm_id']]=array($data['cv_def'],$data['cvterm_def']);
+  }
+  //todo dbxref
+  $select_sql = 'SELECT DISTINCT chado_db_name,chado_dbxref_name '
+  .' FROM {genes4all_submitted_dbxref} WHERE '
+  ."chado_reference_type='$reference_type' ";
+  if (!empty($reference_id)){
+    $select_sql .= " AND chado_reference_id IN ($reference_id) ";
+  }
+  $res = db_query($select_sql);
+  while ($dbdata=db_fetch_array($res)){
+    $data = gmod_dbsf_db_execute('chado','gmod_dbsf_get_dbxref_details',$dbdata['chado_dbxref_name'],$dbdata['chado_db_name']);
+    if(empty($data)){continue;}
+    $return_array['dbxref'][$data['db_name']][$data['dbxref_id']]=$data['dbxref_name'];
+    $return_array['dbxref_def'][$data['db_name']][$data['dbxref_id']]=array($data['db_def'],$data['dbxref_def']);
+  }
+  return $return_array;
+}
+
+function genes4all_curation_get_user_curation_action($reference_type=NULL,$reference_id=NULL,$name=NULL,$term_name=NULL){
+  if (empty($reference_type)|| empty($reference_id)||empty($term_name)){return;}
+  $return_array = array();
+  $format_date = "SELECT date('%s')";
+  $id = gmod_dbsf_db_execute('chado','gmod_dbsf_decypher_cvterm',$term_name,$name);
+    $select_sql = "SELECT submitter_name,date_added,disagree FROM {genes4all_submitted_annotation} WHERE chado_reference_type='$reference_type'"
+      ." AND chado_reference_id=$reference_id AND chado_cv_name='$name' AND chado_cvterm_name='$term_name'"
+      .' ORDER BY date_added';
+  $select_user_uid = "SELECT uid from {users} where name='%s'";
+  $res = db_query($select_sql);
+  while ($dbdata=db_fetch_array($res)){
+    $uid_res = db_fetch_array(db_query($select_user_uid,$dbdata['submitter_name']));
+    $date = db_fetch_array(db_query($format_date,$dbdata['date_added']));
+    $return_array['submitter'][]=$dbdata['submitter_name'];
+    $return_array['date'][]=$date['date'];
+    $return_array['submitter_uid'][]=$uid_res['uid'];
+    if (empty($dbdata['disagree'])){
+      $return_array['agreements']++;
+    }else{
+      $return_array['disagreements']++;
+    }
+  }
+  $id = gmod_dbsf_db_execute('chado','gmod_dbsf_decypher_dbxref',$term_name,$name);
+  $select_sql = "SELECT submitter_name,date_added,disagree FROM {genes4all_submitted_dbxref} WHERE chado_reference_type='$reference_type'"
+      ." AND chado_reference_id=$reference_id AND chado_db_name='$name' AND chado_dbxref_name='$term_name'"
+      .' ORDER BY date_added';
+  $select_user_uid = "SELECT uid from {users} where name='%s'";
+  $res = db_query($select_sql);
+  while ($dbdata=db_fetch_array($res)){
+    $uid_res = db_fetch_array(db_query($select_user_uid,$dbdata['submitter_name']));
+    $date = db_fetch_array(db_query($format_date,$dbdata['date_added']));
+    $return_array['submitter'][]=$dbdata['submitter_name'];
+    $return_array['date'][]=$date['date'];
+    $return_array['submitter_uid'][]=$uid_res['uid'];
+    if (empty($dbdata['disagree'])){
+      $return_array['agreements']++;
+    }else{
+      $return_array['disagreements']++;
+    }
+  }
+
+  return $return_array;
+}
+
+function genes4all_curation_store_user_curation_action($reference_type='feature',$reference_id,$id_array,$disagree=FALSE,$is_dbxref=FALSE){
+  global $user;
+  $name = $user->name;
+  if (empty($reference_type)|| empty($reference_id)||empty($id_array)){return;}
+  if (empty($name)){return;}
+  $disagree = !empty($disagree) ? (int)1 : (int)0;
+  $insert_sql ='';
+  $check_sql ='';
+  $update_sql ='';
+  if (empty($is_dbxref)){
+    $insert_sql = 'INSERT INTO {genes4all_submitted_annotation} (chado_reference_type,chado_reference_id,chado_cv_name,chado_cvterm_name,submitter_name,disagree)'
+    ." VALUES ('$reference_type',$reference_id,'%s','%s','$name',$disagree)";
+    $check_sql = "SELECT submitted_annotation_id as id,disagree from {genes4all_submitted_annotation} WHERE "
+    ." chado_reference_type='$reference_type' AND chado_reference_id=$reference_id AND "
+    ." chado_cv_name='%s' AND chado_cvterm_name='%s' AND submitter_name='$name'";
+    $update_sql = "UPDATE {genes4all_submitted_annotation} SET disagree=%d WHERE submitted_annotation_id=%d";
+  }else{
+    $insert_sql = 'INSERT INTO {genes4all_submitted_dbxref} (chado_reference_type,chado_reference_id,chado_db_name,chado_dbxref_name,submitter_name,disagree)'
+    ." VALUES ('$reference_type',$reference_id,'%s','%s','$name',$disagree)";
+    $check_sql = "SELECT submitted_dbxref_id as id,disagree from {genes4all_submitted_dbxref} WHERE "
+    ." chado_reference_type='$reference_type' AND chado_reference_id=$reference_id AND chado_db_name='%s' "
+    ." AND chado_dbxref_name='%s' AND submitter_name='$name'";
+    $update_sql = "UPDATE {genes4all_submitted_dbxref} SET disagree=%d WHERE submitted_dbxref_id=%d";
+  }
+  foreach ($id_array as $id){
+    $data = array();
+    $check = '';
+    if (empty($is_dbxref)){
+      $data = gmod_dbsf_db_execute('chado','gmod_dbsf_get_cvterm_details',$id);
+      if (empty($data)){
+        drupal_set_message('Error that should not have happened! '.$id,'error');
+        continue;
+      }
+      $check = db_fetch_array(db_query($check_sql,$data['cv_name'],$data['cvterm_name']));
+    }else{
+      $data = gmod_dbsf_db_execute('chado','gmod_dbsf_get_dbxref_details',$id);
+      if (empty($data)){
+        drupal_set_message('Error that should not have happened! '.$id,'error');
+        continue;
+      }
+      $check = db_fetch_array(db_query($check_sql,$data['db_name'],$data['dbxref_name']));
+    }
+    if (!empty($check)){
+      if (!empty($check['disagree']) && !empty($disagree)){
+        drupal_set_message(t('You have already stored that you disagree with this feature annotation.'),'error');
+        return;
+      }if (empty($check['disagree']) && empty($disagree)){
+        drupal_set_message(t('You have already stored that you agree with this feature annotation.'),'error');
+        return;
+      }if (empty($disagree)){
+        $check = '';
+        db_query($update_sql,0,$check['id']);
+        if (empty($is_dbxref)){
+          $check = db_fetch_array(db_query($check_sql,$data['cv_name'],$data['cvterm_name']));
+        }else{
+          $check = db_fetch_array(db_query($check_sql,$data['db_name'],$data['dbxref_name']));
+        }
+        if (!empty($check)){
+          drupal_set_message(t('You have updated your preference for this annotation: You now agree.'),'error');
+        }else{
+          drupal_set_message(t('Failed to update your %type annotation.',array('%type'=>$reference_type)),'error');
+        }
+      }else{
+        $check = '';
+        db_query($update_sql,1,$check['id']);
+        if (empty($is_dbxref)){
+          $check = db_fetch_array(db_query($check_sql,$data['cv_name'],$data['cvterm_name']));
+        }else{
+          $check = db_fetch_array(db_query($check_sql,$data['db_name'],$data['dbxref_name']));
+        }
+        if (!empty($check)){
+          drupal_set_message(t('You have updated your preference for this annotation: You now disagree.'),'error');
+        }else{
+          drupal_set_message(t('Failed to update your %type annotation.',array('%type'=>$reference_type)),'error');
+        }
+      }
+      return;
+    }
+    $check ='';
+    if (empty($is_dbxref)){
+      db_query($insert_sql,$data['cv_name'],$data['cvterm_name']);
+      $check = db_fetch_array(db_query($check_sql,$data['cv_name'],$data['cvterm_name']));
+    }else{
+      db_query($insert_sql,$data['db_name'],$data['dbxref_name']);
+      $check = db_fetch_array(db_query($check_sql,$data['db_name'],$data['dbxref_name']));
+    }
+    if (empty($check)){
+      drupal_set_message(t('Failed to store your %type annotation.',array('%type'=>$reference_type)),'error');
+    }else{
+      drupal_set_message(t('%type annotation has been stored.',array('%type'=>$reference_type)),'warning');
+    }
+  }
+}
+
+function genes4all_curate_cv_list($object_type='library'){
+  $select_sql ='';
+  $return_array = array();
+  switch ($object_type){
+    case 'library':
+      $select_sql = "SELECT cv_id as id,name,definition from {cv} WHERE name IN ('Organ','tissue_type','dev_stage','Site_1','Site_2','Vector','cell_line','cell_type','country','cultivar','isolate','lab_hostgenotype','map','sequencing_technology','sex','strain','sub_species') order by lower(definition),lower(name)";
+      break;
+    case 'library_property':
+      $return_array = gmod_dbsf_get_add_cv_withnames('Library property');
+    case 'organism':
+      break;
+    case 'feature':
+      break;
+  }
+  if (!empty($select_sql)){
+    $res = db_query($select_sql);
+    while ($data = db_fetch_array($res)){
+      $return_array[$data['name']] = !empty($data['definition']) ? $data['definition'] : $data['name'];
+    }
+  }
+  return $return_array;
+}
+
+function genes4all_curate_new_cv_upload_page(){
+  $return = drupal_get_form('genes4all_curate_new_cv_upload_form');
+  return $return;
+}
+
+function genes4all_curate_new_cv_upload_form($form_state){
+  $cv_array = array();
+  $current_custom_cv = gmod_dbsf_get_add_var('genes4all_custom_cv_curate');
+  $current_custom_cv=array_combine((array)$current_custom_cv,(array)$current_custom_cv);
+  $form=array(
+    '#description'=>t('This page allows you to upload a new custom Controlled Vocabulary (CV) into your Chado database or delete an existing one.'),
+    '#title' => t('Control Chado CVs'),
+    '#type'=>'fieldset',
+  	'#collapsible'=>FALSE,
+    'new_cv_field'=> array(
+      '#type' => 'fieldset',
+      '#title'=>t('Upload a new CV'),
+        'name'=>array(
+        '#title'=>t('Name'),
+        '#type'=>'textfield',
+  ),
+        'definition'=>array(
+    	'#title'=>t('Definition'),
+        '#type'=>'textfield',
+  ),
+       'cv_file'=>array(
+        '#title'=>t('CV file'),
+         '#type' => 'file',
+        '#description' => t('A 2+ column CSV or TAB file containing a list of accessions and their definition. Anything after the second field will be added as a property. Do not provide a header row.'),
+    ),
+      'cv_file_type'=>array(
+        '#title'=> t('Delimiter'),
+        '#type'=>'radios',
+        '#options'=>array('csv'=>'Comma','tab'=>'TAB'),
+        '#default_value'=>'csv',
+  ),
+      'cv_file_quote'=>array(
+        '#title'=> t('Quote character'),
+        '#type'=>'radios',
+        '#options'=>array('single'=>'Single quote (\')','double'=>'Double Quote (")'),
+        '#default_value'=>'double',
+  ),
+      'new_cv_field_buttons' => array(
+      'new_cv_button' => array(
+        '#type' => 'submit',
+        '#value' => t('Submit data'),
+      	'#weight' => 10,
+  ),
+       'clear_form' => array(
+      '#type' => 'button',
+      '#value' => t('Clear form'),
+      '#weight' => 11,
+      '#validate' => array('gmod_dbsf_form_clear'),
+  ),
+  ),
+  ),
+  //gmod_dbsf_delete_cv
+   'delete_cv_field'=> array(
+     '#type' => 'fieldset',
+     '#title'=>t('Delete an existing CV'),
+     'cv_selected'=>array(
+        '#title'=>t('Existing CV'),
+        '#description'=>t('Here you can delete one CV; number in brackets denote how many terms this CV is comprised of.'),
+  		'#type' => 'select',
+         '#size'=>1,
+         '#options'=>$current_custom_cv,
+  ),
+     'delete_cv_field_button' => array(
+      'delete_cv_button' => array(
+        '#type' => 'submit',
+        '#value' => t('Delete CV'),
+      	'#weight' => 10,
+  ),
+  ),
+  )
+  );
+  $form['#attributes'] = array('enctype' => 'multipart/form-data');
+  return $form;
+}
+
+function genes4all_curate_new_cv_upload_form_validate($form,&$form_state){
+  if (!empty($form_state['values'])){
+    switch ($form_state['values']['op']){
+      case 'Delete CV':
+        $form_state['values']['cv_selected']=check_plain($form_state['values']['cv_selected']);
+        if (empty($form_state['values']['cv_selected'])){
+          form_set_error('cv_selected',t('No CV selected for deletion.'));
+        }
+        break;
+      case 'Submit data':
+        if (empty($form_state['values']['name'])){
+          form_set_error('name',t('You must provide a name for the new CV.'));
+        }if (empty($form_state['values']['definition'])){
+          form_set_error('definition',t('You must define the new CV.'));
+        }
+
+        if(empty($_FILES['files']['tmp_name']['cv_file'])) {
+          form_set_error('cv_file', t('No file was provided or upload failed'));
+          return;
+        }
+    }
+  }else{
+    form_set_error('', t('No action was requested.'));
+  }
+}
+
+function genes4all_curate_new_cv_upload_form_submit($form,&$form_state){
+  switch ($form_state['values']['op']){
+    case 'Delete CV':
+      $cv = $form_state['values']['cv_selected'];
+      $res = gmod_dbsf_db_execute('chado_edit','gmod_dbsf_delete_cv',$cv);
+      if (!empty($res)){
+        drupal_set_message(t('CV %cv has been deleted',array('%cv'=>$cv)),'warning');
+        $current_custom_cv = gmod_dbsf_get_add_var('genes4all_custom_cv_curate');
+        $current_custom_cv = array_diff($current_custom_cv,(array)$cv);
+        gmod_dbsf_get_add_var('genes4all_custom_cv_curate',$current_custom_cv);
+      }else{
+        drupal_set_message(t('Failed to delete CV %cv',array('%cv'=>$cv)),'error');
+      }
+      break;
+    case 'Submit data':
+      // 1 MB
+      $cv = check_plain($form_state['values']['name']);
+      $cvdef = check_plain($form_state['values']['definition']);
+      $delimiter = check_plain($form_state['values']['cv_file_type']);
+      $quotes = check_plain($form_state['values']['cv_file_quote']);
+      if (empty($cv)||empty($cvdef)||empty($delimiter)||empty($quotes)){
+        form_set_error('new_cv_field',t('There has been an error with the submitted data. Please contact an administrator.'));
+        return;
+      }
+      $validators_file = array('file_validate_size' => array(1024),'file_validate_extensions' => array());
+      $tmpdir          = file_directory_temp();
+      $file            = file_save_upload('cv_file', $validators_file, $tmpdir, FILE_EXISTS_RENAME);
+      if (empty($file)) {
+        form_set_error('cv_file'. $algorithm, t('Sorry your file was not saved. Maybe it is too large (>1 Mb)? Otherwise, '. l('contact', 'contact') .' the administrator.'));
+        return;
+      }
+      file_set_status($file, FILE_STATUS_TEMPORARY);
+      $batch_file_data['infile'] = $file->filepath;
+      $operations[] = array('genes4all_curate_new_cv_upload_batch', array($cv,$cvdef,$file->filepath,$delimiter,$quotes));
+      $batch = array(
+         'title' => t('Preparing data for submission...'),
+          'operations' => $operations,
+          'init_message' => t('Starting upload...'),
+          'progress_message' => t('@remaining operations remaining...'),
+          'error_message' => t('Your submission encountered an error.'),
+          'finished' => 'genes4all_curate_new_cv_upload_batch_finished',
+      );
+      batch_set($batch);
+      break;
+  }
+}
+
+function genes4all_curate_new_cv_upload_batch($cv,$cvdef,$filename,$delimiter,$quotes,&$context){
+  if (empty($filename)){return;}
+  $return = gmod_dbsf_db_execute('chado_edit','gmod_dbsf_chado_load_ontology_from_file',$cv,$cvdef,$filename,$delimiter,$quotes);
+  if (!empty($return)){
+    $context['results']['cv_id']=$return;
+    $context['results']['cv']=$cv;
+    $context['results']['cvdef']=$cvdef;
+  }
+}
+
+function genes4all_curate_new_cv_upload_batch_finished($success, $results, $operations){
+  $message = '';
+  if (!empty($success)) {
+    $message .= "Success: ".join(', ',(array)$results['cv']);
+    foreach ($results['cv'] as $cv){
+      drupal_set_message(t('CV %t has been uploaded from a file',array('%t'=>$cv)),'warning');
+    }
+    $current_custom_cv = gmod_dbsf_get_add_var('genes4all_custom_cv_curate');
+    if (!empty($current_custom_cv)){
+      gmod_dbsf_get_add_var('genes4all_custom_cv_curate',array_unique(array_merge((array)$current_custom_cv,(array)$results['cv'])),FALSE);
+    }else{
+      gmod_dbsf_get_add_var('genes4all_custom_cv_curate',(array)$results['cv'],FALSE);
+    }
+  }
+  else {
+    $error_operation = reset($operations);
+    $message = t('An error occurred while processing your request. Please '. l('contact', 'contact') .' the administrator.');
+    //dpm($error_operation);
+  }
+  drupal_set_message($message, 'warning');
+}
+
+function genes4all_curate_new_db_upload_page(){
+  $return = drupal_get_form('genes4all_curate_new_db_upload_form');
+  return $return;
+}
+
+function genes4all_curate_new_db_upload_form($form_state){
+  $db_array = array();
+  $current_custom_db = gmod_dbsf_get_add_var('genes4all_custom_db_curate');
+  $current_custom_db=array_combine((array)$current_custom_db,(array)$current_custom_db);
+
+  $form=array(
+    '#description'=>t('This page allows you to upload a new external database reference into your Chado database or delete an existing one.'),
+    '#title' => t('Control Chado DBs'),
+    '#type'=>'fieldset',
+    '#collapsible'=>FALSE,
+    'new_db_field'=> array(
+      '#type' => 'fieldset',
+      '#title'=>t('Upload a new DB'),
+        'name'=>array(
+        '#title'=>t('Name'),
+        '#type'=>'textfield',
+  ),
+        'definition'=>array(
+    	'#title'=>t('Short description of the database'),
+        '#type'=>'textfield',
+  ),
+        'url'=>array(
+    	'#title'=>t('Website URL'),
+        '#description'=>t('The URL that houses the database. Optional but highly recommended.'),
+        '#type'=>'textfield',
+  ),
+        'urlprefix'=>array(
+    	'#title'=>t('Term search URL prefix'),
+        '#type'=>'textfield',
+  		'#description'=>t('The URL prefix which can be used to display a particular accession; e.g. <em>http://www.ncbi.nlm.nih.gov/sites/gquery?term= </em>. Optional but highly recommended if it is exists.'),
+  ),
+  		'db_file'=>array(
+        '#title'=>t('DB file'),
+         '#type' => 'file',
+        '#description' => t('A 2+ column CSV or TAB file containing a list of database unique IDs (accessions) and their description. Anything after the second field will be added as a property. Do not provide a header row.'),
+  ),
+      'db_file_type'=>array(
+        '#title'=> t('Delimiter'),
+        '#type'=>'radios',
+        '#options'=>array('csv'=>'Comma','tab'=>'TAB'),
+        '#default_value'=>'csv',
+  ),
+      'db_file_quote'=>array(
+        '#title'=> t('Quote character'),
+        '#type'=>'radios',
+        '#options'=>array('single'=>'Single quote (\')','double'=>'Double Quote (")'),
+        '#default_value'=>'double',
+  ),
+      'new_db_field_buttons' => array(
+      'new_db_button' => array(
+        '#type' => 'submit',
+        '#value' => t('Submit data'),
+      	'#weight' => 10,
+  ),
+       'clear_form' => array(
+      '#type' => 'button',
+      '#value' => t('Clear form'),
+      '#weight' => 11,
+      '#validate' => array('gmod_dbsf_form_clear'),
+  ),
+  ),
+  ),
+  //gmod_dbsf_delete_db
+   'delete_db_field'=> array(
+     '#type' => 'fieldset',
+     '#title'=>t('Delete an existing DB'),
+     'db_selected'=>array(
+        '#title'=>t('Existing DB'),
+         '#type' => 'select',
+         '#size'=>1,
+        '#description'=>t('Here you can delete one external database reference; number in brackets denote how many accession this DB currently holds in your database.'),
+         '#options'=>$current_custom_db,
+  ),
+     'delete_db_field_button' => array(
+      'delete_db_button' => array(
+        '#type' => 'submit',
+        '#value' => t('Delete DB'),
+      	'#weight' => 10,
+  ),
+  ),
+  )
+  );
+  return $form;
+}
+
+function genes4all_curate_new_db_upload_form_validate($form,&$form_state){
+  if (!empty($form_state['values'])){
+    switch ($form_state['values']['op']){
+      case 'Delete DB':
+        $form_state['values']['db_selected']=check_plain($form_state['values']['db_selected']);
+        if (empty($form_state['values']['db_selected'])){
+          form_set_error('db_selected',t('No database selected for deletion.'));
+        }
+        break;
+      case 'Submit data':
+        if (empty($form_state['values']['name'])){
+          form_set_error('name',t('You must provide a name for the new DB.'));
+        }if (empty($form_state['values']['definition'])){
+          form_set_error('definition',t('You must define the new DB.'));
+        }
+        if (empty($form_state['values']['db_file'])){
+          form_set_error('db_file',t('No file was provided!'));
+          return;
+        }
+        if(empty($_POST['files']['tmp_name']['db_file'])) {
+          form_set_error('db_file', t('Upload failed'));
+          return;
+        }
+    }
+  }else{
+    form_set_error('', t('No action was requested.'));
+  }
+}
+
+function genes4all_curate_new_db_upload_form_submit($form,&$form_state){
+  switch ($form_state['values']['op']){
+    case 'Delete DB':
+      $db = $form_state['values']['db_selected'];
+      $res = gmod_dbsf_db_execute('chado_edit','gmod_dbsf_delete_db',$db);
+      if (!empty($res)){
+        $current_custom_db = gmod_dbsf_get_add_var('genes4all_custom_db_curate');
+        $current_custom_db = array_diff($current_custom_db,(array)$db);
+        gmod_dbsf_get_add_var('genes4all_custom_db_curate',$current_custom_db);
+        drupal_set_message(t('External database %db has been deleted',array('%db'=>$db)),'warning');
+      }else{
+        drupal_set_message(t('Failed to delete external database %db',array('%db'=>$db)),'warning');
+      }
+      break;
+    case 'Submit data':
+      // 1 MB
+      $db = check_plain($form_state['values']['name']);
+      $dbdef = check_plain($form_state['values']['definition']);
+      $delimiter = check_plain($form_state['values']['db_file_type']);
+      $quotes = check_plain($form_state['values']['db_file_quote']);
+      if (empty($db)||empty($dbdef)||empty($delimiter)||empty($quotes)){
+        form_set_error('new_db_field',t('There has been an error with the submitted data. Please contact an administrator.'));
+        return;
+      }
+      $validators_file = array('file_validate_size' => array(1024));
+      $tmpdir          = file_directory_temp();
+      $file            = file_save_upload('db_file', $validators_file, $tmpdir, FILE_EXISTS_RENAME);
+      if (empty($file)) {
+        form_set_error('db_file'. $algorithm, t('Sorry your file was not saved. Maybe it is too large (>1 Mb)? Otherwise, '. l('contact', 'contact') .' the administrator.'));
+        return;
+      }
+      file_set_status($file, FILE_STATUS_TEMPORARY);
+      $batch_file_data['infile'] = $file->filepath;
+      $operations[] = array('genes4all_curate_new_db_upload_batch', array($db,$dbdef,$file->filepath,$delimiter,$quotes));
+      $batch = array(
+         'title' => t('Preparing data for submission...'),
+          'operations' => $operations,
+          'init_message' => t('Starting upload...'),
+          'progress_message' => t('@remaining operations remaining...'),
+          'error_message' => t('Your submission encountered an error.'),
+          'finished' => 'genes4all_curate_new_db_upload_batch_finished',
+      );
+      batch_set($batch);
+      break;
+  }
+}
+
+function genes4all_curate_new_db_upload_batch($db,$dbdef,$filename,$delimiter,$quotes,&$context){
+  if (empty($filename)){return;}
+  $return = gmod_dbsf_db_execute('chado_edit','gmod_dbsf_chado_load_dbxref_from_file',$db,$dbdef,$filename,$delimiter,$quotes);
+  if (!empty($return)){
+    $context['results']['db_id']=$return;
+    $context['results']['db']=$db;
+    $context['results']['dbdef']=$dbdef;
+  }
+}
+
+function genes4all_curate_new_db_upload_batch_finished($success, $results, $operations){
+  $message = '';
+  if (!empty($success)) {
+    foreach ($results['db'] as $db){
+      drupal_set_message(t('DB %t has been uploaded from a file',array('%t'=>$db)),'warning');
+    }
+    $current_custom_db = gmod_dbsf_get_add_var('genes4all_custom_db_curate');
+    if (!empty($current_custom_db)){
+      gmod_dbsf_get_add_var('genes4all_custom_db_curate',array_unique(array_merge((array)$current_custom_db,(array)$results['db'])),FALSE);
+    }else{
+      gmod_dbsf_get_add_var('genes4all_custom_db_curate',(array)$results['db'],FALSE);
+    }
+    $message .= "Success: ".join(', ',(array)$results['cv']);
+  }
+  else {
+    $error_operation = reset($operations);
+    $message = t('An error occurred while processing your request. Please '. l('contact', 'contact') .' the administrator.');
+    //dpm($error_operation);
+  }
+  drupal_set_message($message, 'warning');
+}
+
+
+
+///////////////////////////////////////////////////////////////////////
+// Helper functions
+///////////////////////////////////////////////////////////////////////
+function genes4all_curate_ajax_feature_curate_tab($feature_name = NULL) {
+  echo (drupal_get_form('genes4all_curate_curate_ontologies_feature_form', $feature_name));
+}
+
+function genes4all_curate_theme_approve_features_form($form) {
+  if (empty($form['data'])) {
+    return 'No features await curator approval.';
+  }
+  $output = '';
+  $page_tabs = array(
+    'data' => array(
+      '#type' => 'tabset',
+  ),
+  );
+  foreach ($form['data'] as $type => $array) {
+    if (strpos($type, '#') === 0) {
+      continue;
+    }
+
+    $table_array = $array['#value'];
+    // Sortable sorttable actually does not work in our table because it has been converted to a form. this should be fixed by someone with javascript knowledge.
+    drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/gmod_dbsf_sorttable.js');
+
+    // prepare table data for checkboxes
+    $row_checked = array();
+    $checkall = theme('table_select_header_cell');
+    $table_array['header'][0] = array(
+      'data' => $table_array['header'][0], 'class' => $checkall['class'] .' sortable',
+    );
+    // replace first field with checkboxes
+    if (empty($table_array['data'])) {
+      // no rows!
+      return FALSE;
+    }
+    foreach ($table_array['data'] as $id => $value) {
+      $render = drupal_render($form['features'][$type][$id]);
+      $row_checked[] = array(
+        'data' => array_merge((array)$render, array_slice($value, 1)),
+      );
+    }
+    $page_tabs['data'][$type] = array(
+      '#type' => 'tabpage',
+      '#title' => $type,
+      '#content' => theme_table($table_array['header'], $row_checked, $table_array['attributes'], $table_array['caption']),
+    );
+  }
+  unset($form['data']);
+  $output .= tabs_render($page_tabs) . drupal_render($form);
+  return $output;
+}
+
+function genes4all_curate_theme_feature_annotations_form($form){
+  $output='';
+  $table_array = array();
+  if (!empty($form['data']['#value'])){
+    $table_array = $form['data']['#value'];
+  }else{
+    return;
+  }
+  drupal_add_js(drupal_get_path('module', 'gmod_dbsf') .'/includes/gmod_dbsf_sorttable.js');
+  $row_checked = array();
+  $checkall = theme('table_select_header_cell');
+  $table_array['header'][0] = array(
+  	'data' => $table_array['header'][0], 'class' => $checkall['class'] .' sortable'
+  	);
+  	foreach ($table_array['data'] as $row => $value_array) {
+  	  $cvterm_id = $value_array[0]['id'];
+  	  $row_checked[] = array_merge(
+  	  array(
+  	  array('data' => drupal_render($form['checkboxes'][$cvterm_id])),
+  	  ), array_slice($value_array, 1)
+  	  );
+  	}
+  	unset($form['checkboxes']);
+  	unset($form['data']);
+  	$output .= theme_table($table_array['header'], $row_checked, $table_array['attributes'], $table_array['caption']);
+  	$output .= drupal_render($form);
+  	return $output;
+}
+
+
+/**
+ * Implement hook_theme()
+ */
+function genes4all_curate_theme() {
+  $themes = array(
+    'genes4all_curate_approve_features_form' => array(
+      'arguments' => array('form'),
+      'function' => 'genes4all_curate_theme_approve_features_form',
+  ),
+    'genes4all_curate_page_feature_annotations_form' => array(
+      'arguments' => array('form'),
+      'function' => 'genes4all_curate_theme_feature_annotations_form',
+  ),
+  );
+  return ($themes);
+}

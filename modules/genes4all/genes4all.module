@@ -1,0 +1,216 @@
+<?php
+// $Id$
+
+
+/**
+ * @file
+ * The genes4all module contains functions shared between
+ * genes4all sub_modules
+ *
+ * Developed by Alexie Papanicolaou
+ * @see http://insectacentral.org
+ */
+function genes4all_menu() {
+  $items =array();
+  $items['admin/genes4all/empty_cache'] = array(
+    'title' => 'Empty genes4all caches',
+    'page callback' => 'genes4all_empty_caches',
+    'access arguments' => array('Administrate genes4all'),
+    'description' => 'Empty genes4all caches',
+    'type' => MENU_NORMAL_ITEM,
+    );
+  return $items;
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function genes4all_perm() {
+  return array('Administrate genes4all');
+}
+
+function genes4all_init() {
+  $css_file = drupal_get_path('module', 'gmod_dbsf') .'/gmod_dbsf.css';
+  if (file_exists($css_file)) {
+    drupal_add_css($css_file, 'module');
+  }
+  $css_file = drupal_get_path('module', 'genes4all') .'/genes4all.css';
+  if (file_exists($css_file)) {
+    drupal_add_css($css_file, 'module');
+  }
+}
+
+/**
+ * Get data on a stored library and return it as a themed table
+ *
+ * Originally developed for the dbEST database of NCBI. We are performing some cleanup so
+ * that the data makes sense to humans.
+ *
+ *
+ * @param $lib_data
+ * Either the data to present (in an associative array with the 'id', 'name',
+ * 'type', 'organism' and 'accession' variables or the library identifier (or uniquename)
+ * given as a string
+ *
+ * @return HTML of a table with the stored information
+ */
+function genes4all_get_lib_info($lib_data) {
+  if (empty($lib_data)) {
+    return;
+  }
+  if (is_array($lib_data)) {
+    $lib_id        = $lib_data['id'];
+    $lib_name      = $lib_data['name'];
+    $lib_type      = $lib_data['type'];
+    $lib_org_id    = $lib_data['organism'];
+    $lib_accession = $lib_data['accession'];
+    unset($array);
+  }
+  else {
+    $array = gmod_dbsf_chado_determine_library_accession($lib_data);
+    if (empty($array)) {
+      drupal_set_message(t('Cannot find any data for library %lib_data. Are you sure it is supposed to exist? Please leave a feedback.', array('%lib_data' => $lib_data)), 'error');
+      return '';
+    }
+    $lib_id        = $array['id'];
+    $lib_name      = $array['name'];
+    $lib_type      = $array['type'];
+    $lib_org_id    = $array['organism'];
+    $lib_accession = $array['accession'];
+    unset($array);
+  }
+  $rows = array();
+  $rows[] = array('Type', $lib_type);
+  if (!empty($lib_accession)) {
+    $rows[] = array('Accession', $lib_accession);
+  }
+
+  $sql_contig_count = "SELECT count (feature_id) FROM library_feature_contigs_mat WHERE library_id=$lib_id";
+  $count_data       = db_fetch_array(db_query($sql_contig_count));
+  $contigs          = $count_data['count'];
+  if (!empty($contigs)) {
+    $rows[] = array('Contigs', $contigs);
+  }
+
+
+  $tag_array = gmod_dbsf_chado_getlibraries_tags(array('lib_id' => $lib_id));
+  if (empty($tag_array)) {
+    return "I'm sorry but the library you've requested is not activated yet.";
+  }
+  // we want to sort them in a very specific manner:
+    $headers_unfriendly = array(
+    'species_all' => '',
+    'sequencing_technology' => '',
+    'sub_species' => '',
+    'isolate' => '',
+    'cultivar' => '',
+    'strain' => '',
+    'cell_line' => '',
+    'Vector'=>'',
+    'country' => '',
+    'genotype' => '',
+    'map' => '',
+    'dev_stage' => '',
+    'sex' => '',
+    'tissue_type' => '',
+    'Organ' => '',
+    'cell_type' => '',
+    'lab_host' => '',
+    'restr_site' => '',
+  );
+  $head_column = array(
+    'Species',
+    'Sequencing technology',
+    'Sub species',
+    'Isolate',
+    'Cultivar',
+    'Strain',
+    'Cell line',
+  	'Vector',
+    'Country collected in',
+    'Genotype of specimen',
+    'Cytogenetic map',
+    'Developmental stage',
+    'Sex',
+    'Tissue',
+    'Organ',
+    'Cell type used',
+    'Laboratory host used',
+    'Restriction enzymes used',
+  );
+    foreach ($tag_array as $library_name => $tag_data) {
+      if (!empty($tag_data['species'])){
+        $headers_unfriendly['species_all'] = $tag_data['species']['genus'] .' '. $tag_data['species']['species'];
+        if (!empty($tag_data['species']['common_name'])) {
+          $headers_unfriendly['species_all'] .= ' ('. $tag_data['species']['common_name'] .')';
+        }
+        $tag_data['species']='';
+      }
+      if (!empty($tag_data['Site_1'])|| !empty($tag_data['Site_2'])){
+        $headers_unfriendly['restr_site'] = implode(', ',array($tag_data['Site_1'],$tag_data['Site_2']));
+        $tag_data['Site_1']='';$tag_data['Site_2']='';
+      }
+      foreach ($tag_data as $tag=>$value) {
+        //for sorting...
+        if (empty($value)){continue;}
+        $headers_unfriendly[$tag]=$value;
+      }
+    }
+  $index = 0;
+  foreach ($headers_unfriendly as $tag => $value_array) {
+    if (!empty($value_array)) {
+      $value = gmod_dbsf_array2csv($value_array, FALSE, ';');
+      $rows[] = array($head_column[$index], $value);
+    }
+    $index++;
+  }
+
+  $dbxref_data = gmod_dbsf_chado_getlibrary_dbxrefs($lib_id);
+
+  if (!empty($dbxref_data)) {
+    foreach ($dbxref_data as $dbname => $data) {
+      $i = 0;
+      $links = '';
+      foreach ($data['accessions'] as $accession) {
+        if (!empty($data['url'])) {
+          $links .= l($accession, $data['url'][$i]) .' ';
+        }
+        else {
+          $links .= l($accession, 'http://www.ncbi.nlm.nih.gov/sites/entrez?cmd=Search&db=nucest&term='. $lib_name .'[Library%20Name]') .' ';
+        }
+        $i++;
+      }
+      $rows[] = array("Cross-reference to $dbname", $links);
+    }
+  }
+
+  $property_data = gmod_dbsf_chado_getlibrary_properties($lib_id);
+  if (!empty($property_data)) {
+    foreach ($property_data as $name => $data_array) {
+      $data = implode(', ', $data_array);
+      $rows[] = array($name, $data);
+    }
+  }
+
+  $caption = "Information for library $lib_name";
+  $attributes = array('class' => 'genes4all_explore-library-table sortable', 'width' => '200');
+  return array(array('Tag', 'Value'), $rows, $attributes, $caption);
+}
+
+function genes4all_empty_caches(){
+  $sql ='';
+  if (db_table_exists('cache_genes4all_explore_feature')){
+    $sql.='cache_genes4all_explore_feature,';
+  }if (db_table_exists('cache_genes4all_explore_library')){
+    $sql.='cache_genes4all_explore_library,';
+  }if (db_table_exists('cache_genes4all_explore')){
+    $sql.='cache_genes4all_explore,';
+  }if (db_table_exists('cache_genes4all_explore_feature_plots')){
+    $sql.='cache_genes4all_explore_feature_plots,';
+  }
+  $sql = rtrim($sql,',');
+  $sql = 'TRUNCATE '.$sql;
+  db_query($sql);
+  drupal_set_message('Caches emptied');
+  return t('Caches emptied');
+}
